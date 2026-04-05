@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-dotenv
+pydantic
+sqlalchemy
+psycopg2-binary
+pydantic[Email]
+alembic
+google-api-python-client 
+google-auth-httplib2 
+google-auth-oauthlib
