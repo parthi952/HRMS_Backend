@@ -164,7 +164,6 @@ class AttendanceCreate(BaseModel):
 
 
 class Leave(BaseModel):
-
     Emp_id: str
     status : str
     employee_name : str
@@ -172,3 +171,15 @@ class Leave(BaseModel):
     Available : int
     Used : int
     
+
+class LeaveHistory(BaseModel):
+    Emp_id: str
+    employee_name: str
+    Duration: str     # "2026-01-05 to 2026-01-08"
+    Reason: str
+    Days :  int
+    applayDate : str 
+    from_date : str
+    to_date : str
+    status: str       # Approved / Pending / Rejectedda
+    leave_type: str   # ML / PL / CL 

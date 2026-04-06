@@ -63,8 +63,8 @@ class Employee(Base):
     dependents = relationship("Dependents", back_populates="employee", cascade="all, delete-orphan")
     attendance_records = relationship("Attendance", back_populates="employee", cascade="all, delete-orphan")
 
-    leaves = relationship("Leave", back_populates="employee", cascade="all, delete-orphan")
-
+    leaves = relationship("LeaveDB", back_populates="employee", cascade="all, delete-orphan")
+    leavehistory = relationship("LeaveHistoryDB", back_populates="employee", cascade="all, delete-orphan")
 
 
 class Education(Base):
@@ -113,17 +113,35 @@ class Attendance(Base):
 
 
 # employee leave page
-class Leave(Base):
-    __tablename__= "leave"
+class LeaveDB(Base):
+    __tablename__ = "leave"
 
-    id=Column(Integer, primary_key=True, index=True)
-    Emp_id = Column(String,ForeignKey("employees.Emp_id"), nullable=False)
-    status = Column(String, nullable=False)
+    id = Column(Integer, primary_key=True, index=True)
+    Emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
     employee_name = Column(String)
     Total_Leave = Column(Integer)
     Available = Column(Integer)
     Used = Column(Integer)
-
-    # employee = relationship("Employee", back_populates="leaves")
-    # Leave model
     employee = relationship("Employee", back_populates="leaves")
+
+class LeaveHistoryDB(Base):
+    __tablename__ = "leavehistory"
+    id = Column(Integer, primary_key=True, index=True)
+    Emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    employee_name = Column(String)
+    Duration = Column(String)
+    Reason = Column(String)
+    from_date = Column(String)
+    to_date = Column(String)
+    Days = Column(Integer) 
+    applayDate = Column(String)
+    status = Column(String)        # ✅ ADD
+    leave_type = Column(String) 
+    status = Column(String)
+
+    employee = relationship("Employee", back_populates="leavehistory")
+
+
+    
+
+
