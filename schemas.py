@@ -161,3 +161,14 @@ class AttendanceCreate(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class Leave(BaseModel):
+
+    Emp_id: str
+    status : str
+    employee_name : str
+    Total_Leave : int
+    Available : int
+    Used : int
+    

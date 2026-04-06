@@ -5,11 +5,13 @@ from psycopg2 import Date
 from sqlalchemy.orm import Session
 from routers import employee
 from routers import Attendance as att
+from routers import Leave
 from contextlib import asynccontextmanager
 
 # Importing your local modules
 import models
 from database import engine, get_db
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,3 +41,5 @@ app.include_router(employee.router)
 
 # attendance router
 app.include_router(att.router)
+
+app.include_router(Leave.router)

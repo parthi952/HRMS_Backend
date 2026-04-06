@@ -7,7 +7,7 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("URL_DB")
 
-engine = create_engine (DATABASE_URL,echo=True ,connect_args={"sslmode": "require"})    
+engine = create_engine (DATABASE_URL,echo=True )    #connect_args={"sslmode": "require"}
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 

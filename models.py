@@ -63,6 +63,9 @@ class Employee(Base):
     dependents = relationship("Dependents", back_populates="employee", cascade="all, delete-orphan")
     attendance_records = relationship("Attendance", back_populates="employee", cascade="all, delete-orphan")
 
+    leaves = relationship("Leave", back_populates="employee", cascade="all, delete-orphan")
+
+
 
 class Education(Base):
     __tablename__ = "education"
@@ -107,3 +110,20 @@ class Attendance(Base):
     employee_name = Column(String)
 
     employee = relationship("Employee", back_populates="attendance_records")
+
+
+# employee leave page
+class Leave(Base):
+    __tablename__= "leave"
+
+    id=Column(Integer, primary_key=True, index=True)
+    Emp_id = Column(String,ForeignKey("employees.Emp_id"), nullable=False)
+    status = Column(String, nullable=False)
+    employee_name = Column(String)
+    Total_Leave = Column(Integer)
+    Available = Column(Integer)
+    Used = Column(Integer)
+
+    # employee = relationship("Employee", back_populates="leaves")
+    # Leave model
+    employee = relationship("Employee", back_populates="leaves")

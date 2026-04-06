@@ -19,16 +19,7 @@ employer_eps=func.coalesce(func.least(monthly_basic, 15000)*0.0833,0)
 employer_epf=func.coalesce(func.least(monthly_basic, 15000)*0.0367,0)
 net_salary=func.coalesce(monthly_basic-employee_pf)
 
-# def calculate_salary(annual_salary):
-#     monthly_basic = annual_salary / 12
-#     employee_pf = monthly_basic * 0.12
-#     employer_eps = min(monthly_basic, 15000) * 0.0833
-#     employer_epf = min(monthly_basic, 15000) * 0.0367
-#     net_salary = monthly_basic - employee_pf
 
-#     return monthly_basic, employee_pf, employer_eps, employer_epf, net_salary
-
-# Employee creation endpoint
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
 def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db)):
     try:
@@ -228,3 +219,6 @@ def update_employee_dependents(emp_id: str, dependents_in: List[schemas.Dependen
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
