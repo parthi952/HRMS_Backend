@@ -13,12 +13,25 @@ router = APIRouter(
     tags=["Employee"]
 )
 
-monthly_basic=func.coalesce(models.Employee.annualSalary/12,0)
-employee_pf=func.coalesce(monthly_basic*0.12,0)
-employer_eps=func.coalesce(func.least(monthly_basic, 15000)*0.0833,0)
-employer_epf=func.coalesce(func.least(monthly_basic, 15000)*0.0367,0)
-net_salary=func.coalesce(monthly_basic-employee_pf)
+monthly_basic = func.floor(
+    func.coalesce(models.Employee.annualSalary / 12, 0) * 100
+) / 100
 
+employee_pf = func.floor(
+    func.coalesce(monthly_basic * 0.12, 0) * 100
+) / 100
+
+employer_eps = func.floor(
+    func.coalesce(func.least(monthly_basic, 15000) * 0.0833, 0) * 100
+) / 100
+
+employer_epf = func.floor(
+    func.coalesce(func.least(monthly_basic, 15000) * 0.0367, 0) * 100
+) / 100
+
+net_salary = func.floor(
+    func.coalesce(monthly_basic - employee_pf, 0) * 100
+) / 100
 
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
 def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db)):
@@ -38,10 +51,6 @@ def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db
             designation=emp_in.designation,
             emp_type=emp_in.emp_type,
             DateOfJoining=emp_in.DateOfJoining,
-            company_name=emp_in.company_name,
-            position=emp_in.position,
-            FromDate=emp_in.FromDate,
-            ToDate=emp_in.ToDate,
             Street=emp_in.Street,
             City=emp_in.City,
             State=emp_in.State,
@@ -58,6 +67,15 @@ def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db
             bonus_Type=emp_in.bonus_Type,
             bonus_CalculationMode=emp_in.bonus_CalculationMode,
             bonus_Value=emp_in.bonus_Value,
+
+            apply_esi = emp_in.apply_esi,
+            uan_number = emp_in.uan_number,
+            pf_id = emp_in.pf_id,
+            insurance_no = emp_in.insurance_no,
+            aadhar_no = emp_in.aadhar_no,
+            esi_no = emp_in.esi_no,
+            esi_name = emp_in.esi_name,
+            insurance_provider = emp_in.insurance_provider,
            
             bankName=emp_in.bankName,
             accountNumber=emp_in.accountNumber,
@@ -75,8 +93,23 @@ def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db
                 graduationYear=edu.graduationYear,  
             ))
 
-        for dep in emp_in.dependents:
-            db.add(models.Dependents(
+        for nominee in emp_in.nominee:
+            db.add(models.Nominees(
+                nominee_name = nominee.nominee_name,
+                nominee_aadhar = nominee.nominee_aadhar
+            ))
+        
+        for work in emp_in.WorkExp:
+            db.add(models.WorkExpriance(
+                emp_id=emp_in.Emp_id,
+                company_name=work.company_name,
+                position=work.position,
+                FromDate=work.FromDate,
+                ToDate=work.ToDate
+            ))
+            
+        for dep in emp_in.Familys:
+            db.add(models.Familys(
                 emp_id=emp_in.Emp_id,
                 person_name=dep.person_name,
                 relationship_type=dep.relationship_type,
@@ -160,19 +193,21 @@ def update_employee(emp_id: str, emp_in: schemas.EmployeeCreate, db: Session = D
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     
-    # Education and dependents get and update logic here if needed, currently they are not updated in this endpoint.
+    # Education and Familys get and update logic here if needed, currently they are not updated in this endpoint.
 @router.get("/EmployeeEducation/{emp_id}")
 def get_employee_education(emp_id: str, db: Session = Depends(get_db)):
     education = db.query(models.Education).filter(models.Education.emp_id == emp_id).all()
     if not education:
         raise HTTPException(status_code=404, detail="Education details not found for this employee")
     return education
-@router.get("/EmployeeDependents/{emp_id}")
-def get_employee_dependents(emp_id: str, db: Session = Depends(get_db)):
-    dependents = db.query(models.Dependents).filter(models.Dependents.emp_id == emp_id).all()
-    if not dependents:
-        raise HTTPException(status_code=404, detail="Dependent details not found for this employee")
-    return dependents
+
+@router.get("/EmployeeFamilys/{emp_id}")
+def get_employee_Familys(emp_id: str, db: Session = Depends(get_db)):
+    Familys = db.query(models.Familys).filter(models.Familys.emp_id == emp_id).all()
+    if not Familys:
+        raise HTTPException(status_code=404, detail="Family details not found for this employee")
+    return Familys
+
 @router.put("/EmployeeEducationUpdate/{emp_id}")
 def update_employee_education(emp_id: str, education_in: List[schemas.EducationCreate], db: Session = Depends(get_db)):
     emp = db.query(models.Employee).filter(models.Employee.Emp_id == emp_id).first()
@@ -196,16 +231,16 @@ def update_employee_education(emp_id: str, education_in: List[schemas.EducationC
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     
-@router.put("/EmployeeDependentsUpdate/{emp_id}")
-def update_employee_dependents(emp_id: str, dependents_in: List[schemas.DependentCreate], db: Session = Depends(get_db)):
+@router.put("/EmployeeFamilysUpdate/{emp_id}")
+def update_employee_Familys(emp_id: str, Familys_in: List[schemas.FamilyCreate], db: Session = Depends(get_db)):
     emp = db.query(models.Employee).filter(models.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    db.query(models.Dependents).filter(models.Dependents.emp_id == emp_id).delete()
+    db.query(models.Familys).filter(models.Familys.emp_id == emp_id).delete()
     
-    for dep in dependents_in:
-        db.add(models.Dependents(
+    for dep in Familys_in:
+        db.add(models.Familys(
             emp_id=emp_id,
             person_name=dep.person_name,
             relationship_type=dep.relationship_type,
@@ -215,7 +250,7 @@ def update_employee_dependents(emp_id: str, dependents_in: List[schemas.Dependen
 
     try:
         db.commit()
-        return {"message": f"Successfully updated dependent details for employee {emp_id}"}
+        return {"message": f"Successfully updated Family details for employee {emp_id}"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

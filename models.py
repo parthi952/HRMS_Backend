@@ -24,11 +24,18 @@ class Employee(Base):
     DateOfJoining = Column(Date, nullable=True)  # nullable
     Status = Column(String, default="Active")  # New field with default value
 
-    # Previous company
-    company_name = Column(String)
-    position = Column(String)
-    FromDate = Column(String)   
-    ToDate = Column(String)
+    # INS & FD
+
+    apply_esi = Column(Date)
+    uan_number = Column(String)
+    pf_id = Column(String)
+    insurance_no = Column(String)
+    aadhar_no = Column(String)
+    esi_no = Column(String)
+    esi_name = Column(String)
+    insurance_provider = Column(String)
+#   Nominees :Nominees[];
+
 
     # Current address
     Street = Column(String)
@@ -60,9 +67,9 @@ class Employee(Base):
 
 
     education = relationship("Education", back_populates="employee", cascade="all, delete-orphan")
-    dependents = relationship("Dependents", back_populates="employee", cascade="all, delete-orphan")
+    Familys = relationship("Familys", back_populates="employee", cascade="all, delete-orphan")
     attendance_records = relationship("Attendance", back_populates="employee", cascade="all, delete-orphan")
-
+    Work = relationship("WorkExpriance", back_populates="employee", cascade="all, delete-orphan")
     leaves = relationship("LeaveDB", back_populates="employee", cascade="all, delete-orphan")
     leavehistory = relationship("LeaveHistoryDB", back_populates="employee", cascade="all, delete-orphan")
 
@@ -79,9 +86,22 @@ class Education(Base):
 
     employee = relationship("Employee", back_populates="education")
 
+class WorkExpriance(Base):
+    
+    __tablename__ = "Work"
 
-class Dependents(Base):
-    __tablename__ = "dependents"
+    id = Column(Integer, primary_key=True, index=True)
+    emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    company_name = Column(String)
+    position = Column(String)
+    FromDate = Column(String)   
+    ToDate = Column(String)
+
+    employee = relationship("Employee", back_populates="Work")
+
+
+class Familys(Base):
+    __tablename__ = "Familys"
 
     id = Column(Integer, primary_key=True, index=True)
     emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
@@ -91,10 +111,19 @@ class Dependents(Base):
     contact = Column(String)
     person_dob = Column(Date, nullable=True)  # nullable
 
-    employee = relationship("Employee", back_populates="dependents")
+    employee = relationship("Employee", back_populates="Familys")
+    nominees = relationship("Nominees", back_populates="family")
 
 
 
+class Nominees(Base):
+    __tablename__ = "nominee"
+    id = Column(Integer, primary_key=True, index=True)
+    family_id = Column(Integer, ForeignKey("Familys.id"), nullable=False)
+    nominee_name = Column(String)
+    nominee_aadhar = Column(String)
+
+    family = relationship("Familys", back_populates="nominees")
 
 
 # attendance model
@@ -124,6 +153,8 @@ class LeaveDB(Base):
     Used = Column(Integer)
     employee = relationship("Employee", back_populates="leaves")
 
+
+# employee leeve history
 class LeaveHistoryDB(Base):
     __tablename__ = "leavehistory"
     id = Column(Integer, primary_key=True, index=True)
@@ -135,7 +166,7 @@ class LeaveHistoryDB(Base):
     to_date = Column(String)
     Days = Column(Integer) 
     applayDate = Column(String)
-    status = Column(String)        # ✅ ADD
+    status = Column(String)        
     leave_type = Column(String) 
     status = Column(String)
 
@@ -143,5 +174,17 @@ class LeaveHistoryDB(Base):
 
 
     
+class Payroll(Base):
+    __tablename__ = "PayRoll"
+
+    id = Column(Integer, primary_key=True, index=True)
+    Emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    employee_name = Column(String)
+    currency = Column(String)
+    payFrequency = Column(String)
+    annualSalary = Column(Float)
+    monthlySalary = Column(Float)
+    EPF = Column(Float)
+    EPS = Column(Float)
 
 

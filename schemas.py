@@ -1,36 +1,56 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 from datetime import date
 from typing import List, Optional, Any
 
+# A reusable date parser to keep your code DRY (Don't Repeat Yourself)
+def parse_date_flexible(v: Any) -> Optional[date]:
+    if not v or v == "":
+        return None
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    # Handle "YYYY"
+    if len(s) == 4 and s.isdigit():
+        return date(int(s), 1, 1)
+    # Handle ISO "YYYY-MM-DD"
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return None
+    
 
 class EducationCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
     degree: str = ""
     institution: str = ""
     graduationYear: Optional[date] = None 
 
     @field_validator("graduationYear", mode="before")
     @classmethod
-    def parse_graduation_year(cls, v: Any) -> Optional[date]:
-        """Accept '', None, 'YYYY', or 'YYYY-MM-DD'."""
-        if not v or v == "":
-            return None
-        if isinstance(v, date):
-            return v
-        s = str(v).strip()
+    def validate_date(cls, v): return parse_date_flexible(v)
 
-        if len(s) == 4 and s.isdigit():
-            return date(int(s), 1, 1)
-        # Full ISO date
-        try:
-            return date.fromisoformat(s)
-        except ValueError:
-            return None
-
-    class Config:
-        from_attributes = True
+class NomineeCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    nominee_name : str = ""
+    nominee_aadhar :str = ""
 
 
-class DependentCreate(BaseModel):
+class WorkExpCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
+    company_name: str = ""
+    position: str = ""
+    FromDate: Optional[date] = None   
+    ToDate: Optional[date] = None
+
+    @field_validator("FromDate", "ToDate", mode="before")
+    @classmethod
+    def validate_date(cls, v): return parse_date_flexible(v)
+
+class FamilyCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
     person_name: str = ""
     relationship_type: str = ""
     contact: str = ""
@@ -38,21 +58,11 @@ class DependentCreate(BaseModel):
 
     @field_validator("person_dob", mode="before")
     @classmethod
-    def parse_dob(cls, v: Any) -> Optional[date]:
-        if not v or v == "":
-            return None
-        if isinstance(v, date):
-            return v
-        try:
-            return date.fromisoformat(str(v).strip())
-        except ValueError:
-            return None
-
-    class Config:
-        from_attributes = True
-
+    def validate_date(cls, v): return parse_date_flexible(v)
 
 class EmployeeCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     # Personal
     Emp_id: str
     f_name: str
@@ -64,122 +74,81 @@ class EmployeeCreate(BaseModel):
     email: str = ""
     Status: str = "Active"
 
+    # nominees
+    apply_esi : Optional[date] = None
+    uan_number : str
+    pf_id : str
+    insurance_no : str
+    aadhar_no : str
+    esi_no : str
+    esi_name : str
+    insurance_provider : str
+
     # Job
     Department: str = ""
     designation: str = ""
     emp_type: str = ""
     DateOfJoining: Optional[date] = None
 
-    # Previous company — kept as plain strings (no date validation needed)
-    company_name: str = ""
-    position: str = ""
-    FromDate: str = ""
-    ToDate: str = ""
+    # Address
+    Street: str = ""; City: str = ""; State: str = ""; Pin_Code: int = 0
+    p_Street: str = ""; p_City: str = ""; p_State: str = ""; p_Pin_Code: int = 0
 
-    # Current address
-    Street: str = ""
-    City: str = ""
-    State: str = ""
-    Pin_Code: int = 0
-
-    # Permanent address
-    p_Street: str = ""
-    p_City: str = ""
-    p_State: str = ""
-    p_Pin_Code: int = 0
-
-    # Nested lists
+    # Nested lists - FIXED SYNTAX HERE
+    WorkExp: List[WorkExpCreate] = []
     education: List[EducationCreate] = []
-    dependents: List[DependentCreate] = []
+    Familys: List[FamilyCreate] = []
 
-    # Salary
-    provider: str = ""
-    payType: str = ""
-    currency: str = ""
-    payFrequency: str = ""
+    nominee:List[NomineeCreate]=[]
+
+    # Salary & Bank
+    provider: str = ""; payType: str = ""; currency: str = ""; payFrequency: str = ""
     annualSalary: float = 0.0
-    bonus_Type: str = ""
-    bonus_CalculationMode: str = "percentage"
-    bonus_Value: float = 0.0
+    bonus_Type: str = ""; bonus_CalculationMode: str = "percentage"; bonus_Value: float = 0.0
+    bankName: str = ""; accountNumber: str = ""; ifscCode: str = ""; panNumber: str = ""
 
-    # Bank
-    bankName: str = ""
-    accountNumber: str = ""
-    ifscCode: str = ""
-    panNumber: str = ""
-
-
- 
-
-    # --- Coerce empty strings / None → sensible defaults ---
-
+    # Validators
     @field_validator("dob", "DateOfJoining", mode="before")
     @classmethod
-    def parse_top_level_dates(cls, v: Any) -> Optional[date]:
-        if not v or v == "":
-            return None
-        if isinstance(v, date):
-            return v
-        try:
-            return date.fromisoformat(str(v).strip())
-        except ValueError:
-            return None
+    def validate_dates(cls, v): return parse_date_flexible(v)
 
     @field_validator("annualSalary", "bonus_Value", mode="before")
     @classmethod
     def coerce_floats(cls, v: Any) -> float:
-        if v is None or v == "":
-            return 0.0
-        try:
-            return float(v)
-        except (ValueError, TypeError):
-            return 0.0
+        try: return float(v) if v not in (None, "") else 0.0
+        except: return 0.0
 
     @field_validator("Pin_Code", "p_Pin_Code", mode="before")
     @classmethod
     def coerce_ints(cls, v: Any) -> int:
-        if v is None or v == "":
-            return 0
-        try:
-            return int(v)
-        except (ValueError, TypeError):
-            return 0
-
-    class Config:
-        from_attributes = True
-
-
-# attendance schema
+        try: return int(v) if v not in (None, "") else 0
+        except: return 0
 
 class AttendanceCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     Emp_id: str
-    employee_name: Optional[str] = None # <--- ADD THIS
+    employee_name: Optional[str] = None
     date: date
     check_in: Optional[str] = None
     check_out: Optional[str] = None
     status: str
 
-    class Config:
-        from_attributes = True
-
-
 class Leave(BaseModel):
     Emp_id: str
-    status : str
-    employee_name : str
-    Total_Leave : int
-    Available : int
-    Used : int
-    
+    status: str
+    employee_name: str
+    Total_Leave: int
+    Available: int
+    Used: int
 
 class LeaveHistory(BaseModel):
     Emp_id: str
     employee_name: str
-    Duration: str     # "2026-01-05 to 2026-01-08"
+    Duration: str
     Reason: str
-    Days :  int
-    applayDate : str 
-    from_date : str
-    to_date : str
-    status: str       # Approved / Pending / Rejectedda
-    leave_type: str   # ML / PL / CL 
+    Days: int
+    applayDate: str 
+    from_date: str
+    to_date: str
+    status: str
+    leave_type: str
