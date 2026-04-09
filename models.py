@@ -26,7 +26,7 @@ class Employee(Base):
 
     # INS & FD
 
-    apply_esi = Column(Date)
+    apply_esi = Column(String)
     uan_number = Column(String)
     pf_id = Column(String)
     insurance_no = Column(String)

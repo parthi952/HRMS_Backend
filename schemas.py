@@ -2,26 +2,26 @@ from pydantic import BaseModel, field_validator, ConfigDict
 from datetime import date
 from typing import List, Optional, Any
 
-# A reusable date parser to keep your code DRY (Don't Repeat Yourself)
 def parse_date_flexible(v: Any) -> Optional[date]:
     if not v or v == "":
         return None
     if isinstance(v, date):
         return v
     s = str(v).strip()
-    # Handle "YYYY"
     if len(s) == 4 and s.isdigit():
         return date(int(s), 1, 1)
-    # Handle ISO "YYYY-MM-DD"
     try:
         return date.fromisoformat(s)
     except ValueError:
         return None
-    
+
+class NomineeCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    nominee_name: str = ""
+    nominee_aadhar: str = ""
 
 class EducationCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
     degree: str = ""
     institution: str = ""
     graduationYear: Optional[date] = None 
@@ -30,15 +30,8 @@ class EducationCreate(BaseModel):
     @classmethod
     def validate_date(cls, v): return parse_date_flexible(v)
 
-class NomineeCreate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    nominee_name : str = ""
-    nominee_aadhar :str = ""
-
-
 class WorkExpCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
     company_name: str = ""
     position: str = ""
     FromDate: Optional[date] = None   
@@ -50,7 +43,6 @@ class WorkExpCreate(BaseModel):
 
 class FamilyCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
     person_name: str = ""
     relationship_type: str = ""
     contact: str = ""
@@ -63,51 +55,42 @@ class FamilyCreate(BaseModel):
 class EmployeeCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    # Personal
     Emp_id: str
     f_name: str
     l_name: str
-    name: str
     gender: str = ""
     dob: Optional[date] = None
     phone: str = ""
     email: str = ""
     Status: str = "Active"
 
-    # nominees
-    apply_esi : Optional[date] = None
-    uan_number : str
-    pf_id : str
-    insurance_no : str
-    aadhar_no : str
-    esi_no : str
-    esi_name : str
-    insurance_provider : str
+    apply_esi: str = ""
+    uan_number: str = ""
+    pf_id: str = ""
+    insurance_no: str = ""
+    aadhar_no: str = ""
+    esi_no: str = ""
+    esi_name: str = ""
+    insurance_provider: str = ""
 
-    # Job
     Department: str = ""
     designation: str = ""
     emp_type: str = ""
     DateOfJoining: Optional[date] = None
 
-    # Address
     Street: str = ""; City: str = ""; State: str = ""; Pin_Code: int = 0
     p_Street: str = ""; p_City: str = ""; p_State: str = ""; p_Pin_Code: int = 0
 
-    # Nested lists - FIXED SYNTAX HERE
     WorkExp: List[WorkExpCreate] = []
     education: List[EducationCreate] = []
     Familys: List[FamilyCreate] = []
+    nominee: List[NomineeCreate] = []
 
-    nominee:List[NomineeCreate]=[]
-
-    # Salary & Bank
     provider: str = ""; payType: str = ""; currency: str = ""; payFrequency: str = ""
     annualSalary: float = 0.0
     bonus_Type: str = ""; bonus_CalculationMode: str = "percentage"; bonus_Value: float = 0.0
     bankName: str = ""; accountNumber: str = ""; ifscCode: str = ""; panNumber: str = ""
 
-    # Validators
     @field_validator("dob", "DateOfJoining", mode="before")
     @classmethod
     def validate_dates(cls, v): return parse_date_flexible(v)
