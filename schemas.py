@@ -64,7 +64,7 @@ class EmployeeCreate(BaseModel):
     email: str = ""
     Status: str = "Active"
 
-    apply_esi: str = ""
+    apply_esi: Optional[str] = ""
     uan_number: str = ""
     pf_id: str = ""
     insurance_no: str = ""
