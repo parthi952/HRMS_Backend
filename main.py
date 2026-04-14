@@ -3,20 +3,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2 import Date
 from sqlalchemy.orm import Session
-from routers import employee
+from routers import PayRoll, employee
 from routers import Attendance as att
 from routers import Leave
 from contextlib import asynccontextmanager
 
 # Importing your local modules
-import models
+import moduels.EmplyeeDB as EmplyeeDB
 from database import engine, get_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # This automatically creates the tables in PostgreSQL/MySQL on startup
-    models.Base.metadata.create_all(bind=engine)
+    EmplyeeDB.Base.metadata.create_all(bind=engine)
     yield
     print("Shutting down...")
 
@@ -43,3 +43,5 @@ app.include_router(employee.router)
 app.include_router(att.router)
 
 app.include_router(Leave.router)
+
+app.include_router(PayRoll.router)

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import date as date_type
 from typing import Dict, Any
-import models
+import moduels.EmplyeeDB as EmplyeeDB
 from database import get_db
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
@@ -10,22 +10,22 @@ router = APIRouter(prefix="/attendance", tags=["Attendance"])
 @router.get("/")
 def get_attendance(attendance_date: date_type, db: Session = Depends(get_db)):
     # 1. Fetch existing records for this date
-    records = db.query(models.Attendance).filter(
-        models.Attendance.date == attendance_date
+    records = db.query(EmplyeeDB.Attendance).filter(
+        EmplyeeDB.Attendance.date == attendance_date
     ).all()
 
     # 2. If empty, generate records ONLY for ACTIVE employees
     if not records:
         # ✅ Filter by Status="Active" (ensure 'Status' matches your Employee model field name)
-        active_employees = db.query(models.Employee).filter(
-            models.Employee.Status == "Active"
+        active_employees = db.query(EmplyeeDB.Employee).filter(
+            EmplyeeDB.Employee.Status == "Active"
         ).all()
         
         if not active_employees:
             return []
 
         for emp in active_employees:
-            new_record = models.Attendance(
+            new_record = EmplyeeDB.Attendance(
                 Emp_id=emp.Emp_id,
                 employee_name=emp.name, 
                 date=attendance_date,
@@ -37,8 +37,8 @@ def get_attendance(attendance_date: date_type, db: Session = Depends(get_db)):
         
         try:
             db.commit()
-            records = db.query(models.Attendance).filter(
-                models.Attendance.date == attendance_date
+            records = db.query(EmplyeeDB.Attendance).filter(
+                EmplyeeDB.Attendance.date == attendance_date
             ).all()
         except Exception as e:
             db.rollback()
@@ -54,9 +54,9 @@ def update_attendance(
     attendance_date: date_type = Query(...), 
     db: Session = Depends(get_db)
 ):
-    record = db.query(models.Attendance).filter(
-        models.Attendance.Emp_id == emp_id,
-        models.Attendance.date == attendance_date
+    record = db.query(EmplyeeDB.Attendance).filter(
+        EmplyeeDB.Attendance.Emp_id == emp_id,
+        EmplyeeDB.Attendance.date == attendance_date
     ).first()
 
     if not record:

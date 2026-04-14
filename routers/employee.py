@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func,select
 
-import models, schemas
+import moduels.EmplyeeDB as EmplyeeDB, Schemas.employee as employee
 from database import get_db
 
 router = APIRouter(
@@ -14,7 +14,7 @@ router = APIRouter(
 )
 
 monthly_basic = func.floor(
-    func.coalesce(models.Employee.annualSalary / 12, 0) * 100
+    func.coalesce(EmplyeeDB.Employee.annualSalary / 12, 0) * 100
 ) / 100
 
 employee_pf = func.floor(
@@ -34,11 +34,11 @@ net_salary = func.floor(
 ) / 100
 
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
-def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db)):
+def create_employee(emp_in: employee.EmployeeCreate, db: Session = Depends(get_db)):
     try:
 
 
-        new_emp = models.Employee(
+        new_emp = EmplyeeDB.Employee(
             Emp_id=emp_in.Emp_id,
             f_name=emp_in.f_name,
             l_name=emp_in.l_name,
@@ -86,7 +86,7 @@ def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db
         db.flush() 
 
         for edu in emp_in.education:
-            db.add(models.Education(
+            db.add(EmplyeeDB.Education(
                 emp_id=emp_in.Emp_id,
                 degree=edu.degree,
                 institution=edu.institution,
@@ -94,13 +94,13 @@ def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db
             ))
 
         for nominee in emp_in.nominee:
-            db.add(models.Nominees(
+            db.add(EmplyeeDB.Nominees(
                 nominee_name = nominee.nominee_name,
                 nominee_aadhar = nominee.nominee_aadhar
             ))
         
         for work in emp_in.WorkExp:
-            db.add(models.WorkExpriance(
+            db.add(EmplyeeDB.WorkExpriance(
                 emp_id=emp_in.Emp_id,
                 company_name=work.company_name,
                 position=work.position,
@@ -109,7 +109,7 @@ def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db
             ))
             
         for dep in emp_in.Familys:
-            db.add(models.Familys(
+            db.add(EmplyeeDB.Familys(
                 emp_id=emp_in.Emp_id,
                 person_name=dep.person_name,
                 relationship_type=dep.relationship_type,
@@ -136,12 +136,12 @@ def create_employee(emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db
 def get_employee(emp_id: str, db: Session = Depends(get_db)):
 
     stmt = select(
-        models.Employee,
+        EmplyeeDB.Employee,
         monthly_basic.label("monthly_salary"),
         employee_pf.label("PF"),
         employer_epf.label("EPF"),
         employer_eps.label("EPS")
-    ).where(models.Employee.Emp_id == emp_id)
+    ).where(EmplyeeDB.Employee.Emp_id == emp_id)
 
     result = db.execute(stmt).first()
 
@@ -163,7 +163,7 @@ def get_employee(emp_id: str, db: Session = Depends(get_db)):
 @router.get("/")
 def list_employees(db: Session = Depends(get_db)):
     employees_stmt = select(
-        models.Employee
+        EmplyeeDB.Employee
     )
 
     
@@ -173,8 +173,8 @@ def list_employees(db: Session = Depends(get_db)):
 
 # specific employee update endpoint
 @router.put("/EmployeeUpdate/{emp_id}") 
-def update_employee(emp_id: str, emp_in: schemas.EmployeeCreate, db: Session = Depends(get_db)):
-    emp = db.query(models.Employee).filter(models.Employee.Emp_id == emp_id).first()
+def update_employee(emp_id: str, emp_in: employee.EmployeeCreate, db: Session = Depends(get_db)):
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -196,28 +196,28 @@ def update_employee(emp_id: str, emp_in: schemas.EmployeeCreate, db: Session = D
     # Education and Familys get and update logic here if needed, currently they are not updated in this endpoint.
 @router.get("/EmployeeEducation/{emp_id}")
 def get_employee_education(emp_id: str, db: Session = Depends(get_db)):
-    education = db.query(models.Education).filter(models.Education.emp_id == emp_id).all()
+    education = db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).all()
     if not education:
         raise HTTPException(status_code=404, detail="Education details not found for this employee")
     return education
 
 @router.get("/EmployeeFamilys/{emp_id}")
 def get_employee_Familys(emp_id: str, db: Session = Depends(get_db)):
-    Familys = db.query(models.Familys).filter(models.Familys.emp_id == emp_id).all()
+    Familys = db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).all()
     if not Familys:
         raise HTTPException(status_code=404, detail="Family details not found for this employee")
     return Familys
 
 @router.put("/EmployeeEducationUpdate/{emp_id}")
-def update_employee_education(emp_id: str, education_in: List[schemas.EducationCreate], db: Session = Depends(get_db)):
-    emp = db.query(models.Employee).filter(models.Employee.Emp_id == emp_id).first()
+def update_employee_education(emp_id: str, education_in: List[employee.EducationCreate], db: Session = Depends(get_db)):
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    db.query(models.Education).filter(models.Education.emp_id == emp_id).delete()
+    db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).delete()
     
     for edu in education_in:
-        db.add(models.Education(
+        db.add(EmplyeeDB.Education(
             emp_id=emp_id,
             degree=edu.degree,
             institution=edu.institution,
@@ -232,15 +232,15 @@ def update_employee_education(emp_id: str, education_in: List[schemas.EducationC
         raise HTTPException(status_code=500, detail=str(e))
     
 @router.put("/EmployeeFamilysUpdate/{emp_id}")
-def update_employee_Familys(emp_id: str, Familys_in: List[schemas.FamilyCreate], db: Session = Depends(get_db)):
-    emp = db.query(models.Employee).filter(models.Employee.Emp_id == emp_id).first()
+def update_employee_Familys(emp_id: str, Familys_in: List[employee.FamilyCreate], db: Session = Depends(get_db)):
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    db.query(models.Familys).filter(models.Familys.emp_id == emp_id).delete()
+    db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).delete()
     
     for dep in Familys_in:
-        db.add(models.Familys(
+        db.add(EmplyeeDB.Familys(
             emp_id=emp_id,
             person_name=dep.person_name,
             relationship_type=dep.relationship_type,

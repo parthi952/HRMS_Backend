@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
-import models, schemas
+import moduels.EmplyeeDB as EmplyeeDB, Schemas.employee as employee
 from database import get_db
 
 router = APIRouter(
@@ -37,12 +37,12 @@ def get_leave_details(duration_str: str):
 @router.get("/all-balances")
 def get_all_leave_balances(db: Session = Depends(get_db)):
     results = db.query(
-        models.Employee.Emp_id,
-        models.Employee.name,
-        models.LeaveDB.Total_Leave,
-        models.LeaveDB.Used,
-        models.LeaveDB.Available
-    ).outerjoin(models.LeaveDB, models.Employee.Emp_id == models.LeaveDB.Emp_id).all()
+        EmplyeeDB.Employee.Emp_id,
+        EmplyeeDB.Employee.name,
+        EmplyeeDB.LeaveDB.Total_Leave,
+        EmplyeeDB.LeaveDB.Used,
+        EmplyeeDB.LeaveDB.Available
+    ).outerjoin(EmplyeeDB.LeaveDB, EmplyeeDB.Employee.Emp_id == EmplyeeDB.LeaveDB.Emp_id).all()
 
     return [
         {
@@ -58,7 +58,7 @@ def get_all_leave_balances(db: Session = Depends(get_db)):
 # ✅ APPLY LEAVE (With Date Logic)
 # ==============================
 @router.post("/apply")
-def apply_leave(leave_his: schemas.LeaveHistory, db: Session = Depends(get_db)):
+def apply_leave(leave_his: employee.LeaveHistory, db: Session = Depends(get_db)):
     # 1. Generate dates from duration
     days_count, f_date, t_date = get_leave_details(leave_his.Duration)
     
@@ -66,17 +66,17 @@ def apply_leave(leave_his: schemas.LeaveHistory, db: Session = Depends(get_db)):
     today_date = datetime.now().strftime("%Y-%m-%d")
 
     # 3. Check 12-day limit per type
-    used_for_type = db.query(func.sum(models.LeaveHistoryDB.Days))\
-        .filter(models.LeaveHistoryDB.Emp_id == leave_his.Emp_id)\
-        .filter(models.LeaveHistoryDB.leave_type == leave_his.leave_type)\
-        .filter(models.LeaveHistoryDB.status == "Approved")\
+    used_for_type = db.query(func.sum(EmplyeeDB.LeaveHistoryDB.Days))\
+        .filter(EmplyeeDB.LeaveHistoryDB.Emp_id == leave_his.Emp_id)\
+        .filter(EmplyeeDB.LeaveHistoryDB.leave_type == leave_his.leave_type)\
+        .filter(EmplyeeDB.LeaveHistoryDB.status == "Approved")\
         .scalar() or 0
 
     if (used_for_type + days_count) > 12:
         raise HTTPException(status_code=400, detail=f"Insufficient {leave_his.leave_type} balance.")
 
     # 4. Save to Database
-    new_entry = models.LeaveHistoryDB(
+    new_entry = EmplyeeDB.LeaveHistoryDB(
         Emp_id=leave_his.Emp_id,
         employee_name=leave_his.employee_name,
         Duration=leave_his.Duration,
@@ -98,14 +98,14 @@ def apply_leave(leave_his: schemas.LeaveHistory, db: Session = Depends(get_db)):
 
 @router.put("/update-status/{leave_id}")
 def update_status(leave_id: int, status: str, db: Session = Depends(get_db)):
-    leave = db.query(models.LeaveHistoryDB).filter(models.LeaveHistoryDB.id == leave_id).first()
+    leave = db.query(EmplyeeDB.LeaveHistoryDB).filter(EmplyeeDB.LeaveHistoryDB.id == leave_id).first()
     if not leave or leave.status == "Approved":
         raise HTTPException(status_code=400, detail="Invalid request or already approved")
 
     if status == "Approved":
-        master = db.query(models.LeaveDB).filter(models.LeaveDB.Emp_id == leave.Emp_id).first()
+        master = db.query(EmplyeeDB.LeaveDB).filter(EmplyeeDB.LeaveDB.Emp_id == leave.Emp_id).first()
         if not master:
-            master = models.LeaveDB(Emp_id=leave.Emp_id, employee_name=leave.employee_name, Total_Leave=36, Used=0, Available=36)
+            master = EmplyeeDB.LeaveDB(Emp_id=leave.Emp_id, employee_name=leave.employee_name, Total_Leave=36, Used=0, Available=36)
             db.add(master)
         
         master.Used += leave.Days
@@ -123,10 +123,10 @@ def update_status(leave_id: int, status: str, db: Session = Depends(get_db)):
 def get_employee_leave_details(emp_id: str, db: Session = Depends(get_db)):
     
     # 1. Fetch Master Balance
-    balance = db.query(models.LeaveDB).filter(models.LeaveDB.Emp_id == emp_id).first()
+    balance = db.query(EmplyeeDB.LeaveDB).filter(EmplyeeDB.LeaveDB.Emp_id == emp_id).first()
     
     # 2. Fetch Detailed History List
-    history = db.query(models.LeaveHistoryDB).filter(models.LeaveHistoryDB.Emp_id == emp_id).all()
+    history = db.query(EmplyeeDB.LeaveHistoryDB).filter(EmplyeeDB.LeaveHistoryDB.Emp_id == emp_id).all()
 
     # 3. Handle case where employee has no leave records yet
     if not balance:

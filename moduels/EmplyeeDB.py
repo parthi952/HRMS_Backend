@@ -9,8 +9,7 @@ from database import Base
 class Employee(Base):
     __tablename__ = "employees"
 
-    id = Column(Integer, primary_key=True, index=True)
-    Emp_id = Column(String, unique=True, nullable=False)
+    Emp_id = Column(String, unique=True,primary_key=True, nullable=False)
     f_name = Column(String)
     l_name = Column(String)
     name = Column(String)
@@ -34,7 +33,6 @@ class Employee(Base):
     esi_no = Column(String)
     esi_name = Column(String)
     insurance_provider = Column(String)
-#   Nominees :Nominees[];
 
 
     # Current address
@@ -72,7 +70,7 @@ class Employee(Base):
     Work = relationship("WorkExpriance", back_populates="employee", cascade="all, delete-orphan")
     leaves = relationship("LeaveDB", back_populates="employee", cascade="all, delete-orphan")
     leavehistory = relationship("LeaveHistoryDB", back_populates="employee", cascade="all, delete-orphan")
-
+    payroll = relationship("Payroll", back_populates="employee", cascade="all, delete-orphan")
 
 class Education(Base):
     __tablename__ = "education"
@@ -90,8 +88,8 @@ class WorkExpriance(Base):
     
     __tablename__ = "Work"
 
-    id = Column(Integer, primary_key=True, index=True)
-    emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    # id = Column(Integer, primary_key=True, index=True)
+    emp_id = Column(String, ForeignKey("employees.Emp_id"),primary_key=True, nullable=False)
     company_name = Column(String)
     position = Column(String)
     FromDate = Column(String)   
@@ -104,7 +102,7 @@ class Familys(Base):
     __tablename__ = "Familys"
 
     id = Column(Integer, primary_key=True, index=True)
-    emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    emp_id = Column(String, ForeignKey("employees.Emp_id"))
 
     person_name = Column(String)
     relationship_type = Column(String)
@@ -118,8 +116,8 @@ class Familys(Base):
 
 class Nominees(Base):
     __tablename__ = "nominee"
-    id = Column(Integer, primary_key=True, index=True)
-    family_id = Column(Integer, ForeignKey("Familys.id"), nullable=False)
+
+    family_id = Column(Integer, ForeignKey("Familys.id"),primary_key=True, nullable=False)
     nominee_name = Column(String)
     nominee_aadhar = Column(String)
 
@@ -130,8 +128,7 @@ class Nominees(Base):
 class Attendance(Base):
     __tablename__ = "attendance"
 
-    id = Column(Integer, primary_key=True, index=True)
-    Emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    Emp_id = Column(String, ForeignKey("employees.Emp_id"),primary_key=True, nullable=False)
     date = Column(Date, nullable=False)
     check_in = Column(String)
     check_out = Column(String)
@@ -145,8 +142,7 @@ class Attendance(Base):
 class LeaveDB(Base):
     __tablename__ = "leave"
 
-    id = Column(Integer, primary_key=True, index=True)
-    Emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    Emp_id = Column(String, ForeignKey("employees.Emp_id"),primary_key=True,  nullable=False)
     employee_name = Column(String)
     Total_Leave = Column(Integer)
     Available = Column(Integer)
@@ -157,8 +153,7 @@ class LeaveDB(Base):
 # employee leeve history
 class LeaveHistoryDB(Base):
     __tablename__ = "leavehistory"
-    id = Column(Integer, primary_key=True, index=True)
-    Emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    Emp_id = Column(String, ForeignKey("employees.Emp_id"),primary_key=True, nullable=False)
     employee_name = Column(String)
     Duration = Column(String)
     Reason = Column(String)
@@ -172,19 +167,5 @@ class LeaveHistoryDB(Base):
 
     employee = relationship("Employee", back_populates="leavehistory")
 
-
-    
-class Payroll(Base):
-    __tablename__ = "PayRoll"
-
-    id = Column(Integer, primary_key=True, index=True)
-    Emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
-    employee_name = Column(String)
-    currency = Column(String)
-    payFrequency = Column(String)
-    annualSalary = Column(Float)
-    monthlySalary = Column(Float)
-    EPF = Column(Float)
-    EPS = Column(Float)
 
 
