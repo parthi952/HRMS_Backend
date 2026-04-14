@@ -7,12 +7,15 @@ class Payroll(Base):
     __tablename__ = "payroll"
 
     id = Column(Integer, primary_key=True, index=True)
-    payroll_id = Column(Integer, unique=True, index=True, nullable=False)  # Fixed: added unique constraint
-    provider_id = Column(String, ForeignKey("PayRollProviders.provider_id"), nullable=False)  # Fixed: added ForeignKey
-    emp_id = Column(String, ForeignKey("employees.Emp_id"), nullable=False)  # Fixed: consistent snake_case
-    annual_salary = Column(Float, nullable=False)   # Fixed: snake_case
-    monthly_salary = Column(Float, nullable=False)  # Fixed: snake_case
 
-    # Relationships
+    Payroll_id = Column("Payroll_id", Integer, unique=True, index=True, nullable=False)  # ✅ FIX
+
+    provider_id = Column(String, ForeignKey("PayRollProviders.provider_id"), nullable=False)
+
+    emp_id = Column("Emp_id", String, ForeignKey("employees.Emp_id"), nullable=False)  # ✅ FIX
+
+    annual_salary = Column("annualSalary", Float, nullable=False)
+    monthly_salary = Column("monthlySalary", Float, nullable=False)
+
     employee = relationship("Employee", back_populates="payroll")
-    provider = relationship("PayRollProvider", back_populates="payroll")  # Fixed: added back-reference
+    provider = relationship("PayRollProvider", back_populates="payroll")

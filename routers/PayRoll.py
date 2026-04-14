@@ -77,23 +77,35 @@ def get_provider_by_id(provider_id: str, db: Session = Depends(get_db)):
     return provider
 
 
-@router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+
+@router.delete("/providers/{provider_id}")
 def delete_provider(provider_id: str, db: Session = Depends(get_db)):
-    provider = db.query(PayRollProvider).filter(
-        PayRollProvider.provider_id == provider_id
-    ).first()
-    if not provider:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Provider '{provider_id}' not found."
-        )
     try:
+        provider = db.query(PayRollProvider).filter(
+            PayRollProvider.provider_id == provider_id
+        ).first()
+
+        if not provider:
+            raise HTTPException(status_code=404, detail="Provider not found")
+
+        # ✅ Delete children using ORM (SAFE)
+        for earning in provider.earnings:
+            db.delete(earning)
+
+        for deduction in provider.deductions:
+            db.delete(deduction)
+
+        # ✅ Delete parent
         db.delete(provider)
+
         db.commit()
+
+        return {"message": "Deleted successfully"}
+
     except Exception as e:
         db.rollback()
-        logger.error(f"Failed to delete payroll provider: {e}")
+        print("🔥 REAL DELETE ERROR:", e)  # IMPORTANT
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete payroll provider."
+            status_code=500,
+            detail=str(e)   # 👈 show real error in frontend
         )

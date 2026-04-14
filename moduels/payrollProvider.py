@@ -40,3 +40,6 @@ class Deduction(Base):
     value = Column(Float, nullable=False)
 
     provider = relationship("PayRollProvider", back_populates="deductions")
+
+
+

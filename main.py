@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from routers import PayRoll, employee
 from routers import Attendance as att
 from routers import Leave
+from routers import option
 from contextlib import asynccontextmanager
 
 # Importing your local modules
@@ -45,3 +46,5 @@ app.include_router(att.router)
 app.include_router(Leave.router)
 
 app.include_router(PayRoll.router)
+
+app.include_router(option.router)

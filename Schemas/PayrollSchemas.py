@@ -3,14 +3,13 @@ from typing import List, Optional
 from enum import Enum
 
 
-# --- Enums ---
 
 class ComponentType(str, Enum):
     fixed = "fixed"
     percentage = "percentage"
 
 
-# --- Shared Base ---
+
 
 class PayrollComponentBase(BaseModel):
     """Shared base for earnings and deductions to avoid duplication."""
