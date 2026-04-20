@@ -55,7 +55,7 @@ class FamilyCreate(BaseModel):
 class EmployeeCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    Emp_id: str
+    # Emp_id: str
     f_name: str
     l_name: str
     gender: str = ""

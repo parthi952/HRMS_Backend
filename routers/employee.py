@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func,select
 
+from Caluclation.IdCustom import generate_next_empid
 import moduels.EmplyeeDB as EmplyeeDB, Schemas.employee as employee
 from database import get_db
 
@@ -36,13 +37,16 @@ net_salary = func.floor(
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
 def create_employee(emp_in: employee.EmployeeCreate, db: Session = Depends(get_db)):
     try:
-
-
+        # 1. Generate the unique ID on the server
+        new_generated_id = generate_next_empid(db)
+        
+        # 2. Create the Employee record
         new_emp = EmplyeeDB.Employee(
-            Emp_id=emp_in.Emp_id,
+            Emp_id=new_generated_id,
             f_name=emp_in.f_name,
             l_name=emp_in.l_name,
-            name=func.concat(emp_in.f_name, " ", emp_in.l_name).label("name"),
+            # Standard Python string concatenation is safer for object creation
+            name=f"{emp_in.f_name} {emp_in.l_name}", 
             gender=emp_in.gender,
             dob=emp_in.dob,
             phone=emp_in.phone,
@@ -67,50 +71,57 @@ def create_employee(emp_in: employee.EmployeeCreate, db: Session = Depends(get_d
             bonus_Type=emp_in.bonus_Type,
             bonus_CalculationMode=emp_in.bonus_CalculationMode,
             bonus_Value=emp_in.bonus_Value,
-
-            apply_esi = emp_in.apply_esi,
-            uan_number = emp_in.uan_number,
-            pf_id = emp_in.pf_id,
-            insurance_no = emp_in.insurance_no,
-            aadhar_no = emp_in.aadhar_no,
-            esi_no = emp_in.esi_no,
-            esi_name = emp_in.esi_name,
-            insurance_provider = emp_in.insurance_provider,
-           
+            apply_esi=emp_in.apply_esi,
+            uan_number=emp_in.uan_number,
+            pf_id=emp_in.pf_id,
+            insurance_no=emp_in.insurance_no,
+            aadhar_no=emp_in.aadhar_no,
+            esi_no=emp_in.esi_no,
+            esi_name=emp_in.esi_name,
+            insurance_provider=emp_in.insurance_provider,
             bankName=emp_in.bankName,
             accountNumber=emp_in.accountNumber,
             ifscCode=emp_in.ifscCode,
             panNumber=emp_in.panNumber,
         )
         db.add(new_emp)
+        
+        # Flush sends the 'INSERT' to the DB so foreign keys work, 
+        # but it doesn't 'Commit' yet.
         db.flush() 
 
+        # 3. Add Education using the generated ID
         for edu in emp_in.education:
             db.add(EmplyeeDB.Education(
-                emp_id=emp_in.Emp_id,
+                emp_id=new_generated_id,
                 degree=edu.degree,
                 institution=edu.institution,
                 graduationYear=edu.graduationYear,  
             ))
 
+        # 4. Add Nominees (Ensure these are linked correctly)
         for nominee in emp_in.nominee:
             db.add(EmplyeeDB.Nominees(
-                nominee_name = nominee.nominee_name,
-                nominee_aadhar = nominee.nominee_aadhar
+                nominee_name=nominee.nominee_name,
+                nominee_aadhar=nominee.nominee_aadhar,
+                emp_id=new_generated_id
+                # If Nominee needs an Emp_id link, add it here
             ))
         
+        # 5. Add Work Experience
         for work in emp_in.WorkExp:
             db.add(EmplyeeDB.WorkExpriance(
-                emp_id=emp_in.Emp_id,
+                emp_id=new_generated_id,
                 company_name=work.company_name,
                 position=work.position,
                 FromDate=work.FromDate,
                 ToDate=work.ToDate
             ))
             
+        # 6. Add Family Details
         for dep in emp_in.Familys:
             db.add(EmplyeeDB.Familys(
-                emp_id=emp_in.Emp_id,
+                emp_id=new_generated_id,
                 person_name=dep.person_name,
                 relationship_type=dep.relationship_type,
                 contact=dep.contact,
@@ -118,18 +129,26 @@ def create_employee(emp_in: employee.EmployeeCreate, db: Session = Depends(get_d
             ))
 
         db.commit()
-        return {"message": f"Successfully created employee {emp_in.Emp_id}"}
+        return {
+            "message": "Successfully created employee", 
+            "Emp_id": new_generated_id
+        }
 
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail=f"Employee ID '{emp_in.Emp_id}' already exists."
-        )
     except Exception as e:
         db.rollback()
         print(f"Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    
+@router.get("/next-id")
+def get_next_id(db: Session = Depends(get_db)):
+    from Caluclation.IdCustom import generate_next_empid
+    
+    # This just predicts the ID based on current count + 1
+    next_id = generate_next_empid(db)
+    
+    return {"next_id": next_id}
+
+
 
 #employee get endpoint
 @router.get("/{emp_id}")
@@ -256,4 +275,5 @@ def update_employee_Familys(emp_id: str, Familys_in: List[employee.FamilyCreate]
         raise HTTPException(status_code=500, detail=str(e))
     
 
+# In routers/employee.py
 

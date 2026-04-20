@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
+from moduels import EmplyeeDB
 from moduels.payrollProvider import PayRollProvider, Earning, Deduction
 from Schemas.PayrollSchemas import PayRollProviderCreate, PayRollProviderOut
 from typing import List
@@ -10,7 +11,6 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/payroll", tags=["Payroll"])
-
 
 @router.post(
     "/create/providers",
@@ -80,6 +80,7 @@ def get_provider_by_id(provider_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/providers/{provider_id}")
 def delete_provider(provider_id: str, db: Session = Depends(get_db)):
+
     try:
         provider = db.query(PayRollProvider).filter(
             PayRollProvider.provider_id == provider_id
@@ -109,3 +110,98 @@ def delete_provider(provider_id: str, db: Session = Depends(get_db)):
             status_code=500,
             detail=str(e)   # 👈 show real error in frontend
         )
+    
+
+
+@router.get("/details/{emp_id}")
+def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
+
+    # ✅ 1. Get Employee FIRST
+    emp = db.query(EmplyeeDB.Employee).filter(
+        EmplyeeDB.Employee.Emp_id == emp_id
+    ).first()
+
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # ✅ 2. Get Provider using provider_id
+    provider = db.query(PayRollProvider).filter(
+        PayRollProvider.provider_id == emp.provider
+    ).first()
+
+    if not provider:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Provider '{emp.provider}' not found"
+        )
+
+    base_salary = float(emp.annualSalary or 0) / 12
+
+    earnings_list = []
+    deductions_list = []
+
+    total_earnings = 0
+    total_deductions = 0
+
+    # ✅ Earnings
+    for earn in provider.earnings:
+        val = (base_salary * earn.value) / 100 if earn.type == "percentage" else earn.value
+        earnings_list.append({
+            "name": earn.name,
+            "value": val
+        })
+        total_earnings += val
+
+    # ❌ Deductions
+    for ded in provider.deductions:
+        val = (base_salary * ded.value) / 100 if ded.type == "percentage" else ded.value
+        deductions_list.append({
+            "name": ded.name,
+            "value": val
+        })
+        total_deductions += val
+
+    gross_salary = base_salary + total_earnings
+    net_salary = gross_salary - total_deductions
+
+    return {
+        "emp_id": emp_id,
+        "provider": emp.provider,
+        "base_salary": base_salary,
+        "earnings": earnings_list,
+        "deductions": deductions_list,
+        "gross_salary": gross_salary,
+        "net_salary": net_salary
+    }
+
+
+
+@router.get("/")
+def get_all_employee_payroll(db: Session = Depends(get_db)):
+
+    try:
+        employees = db.query(EmplyeeDB.Employee).all()
+
+        result = []
+
+        for emp in employees:
+
+            annual = float(emp.annualSalary or 0)
+
+            monthly_salary = annual / 12
+
+            name = f"{emp.f_name or ''} {emp.l_name or ''}".strip()
+
+            result.append({
+    "emp_id": emp.Emp_id,
+    "employee": f"{emp.f_name or ''} {emp.l_name or ''}".strip(),
+    "department": emp.Department or "N/A",
+    "net": monthly_salary,
+    "status": "Pending"
+})
+
+        return result
+
+    except Exception as e:
+        print("🔥 ERROR:", e)   # 👈 VERY IMPORTANT
+        raise HTTPException(status_code=500, detail=str(e))

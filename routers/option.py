@@ -120,3 +120,17 @@ def get_by_key(key: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Not found")
 
     return category
+
+
+@router.post("/id-format")
+def update_id_format(entity: str, prefix: str, separator: str, db: Session = Depends(get_db)):
+    config = db.query(IdSetting).filter(IdSetting.entity_type == entity).first()
+    
+    if not config:
+        config = IdSetting(entity_type=entity)
+        db.add(config)
+    
+    config.prefix = prefix
+    config.separator = separator
+    db.commit()
+    return {"status": "success", "message": f"{entity} format updated"}

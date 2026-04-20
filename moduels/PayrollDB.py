@@ -8,11 +8,11 @@ class Payroll(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    Payroll_id = Column("Payroll_id", Integer, unique=True, index=True, nullable=False)  # ✅ FIX
+    Payroll_id = Column("Payroll_id", Integer, unique=True, index=True, nullable=False)  
 
     provider_id = Column(String, ForeignKey("PayRollProviders.provider_id"), nullable=False)
 
-    emp_id = Column("Emp_id", String, ForeignKey("employees.Emp_id"), nullable=False)  # ✅ FIX
+    emp_id = Column("Emp_id", String, ForeignKey("employees.Emp_id"), nullable=False)  
 
     annual_salary = Column("annualSalary", Float, nullable=False)
     monthly_salary = Column("monthlySalary", Float, nullable=False)
