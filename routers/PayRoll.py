@@ -110,13 +110,13 @@ def delete_provider(provider_id: str, db: Session = Depends(get_db)):
             status_code=500,
             detail=str(e)   # 👈 show real error in frontend
         )
-    
+
 
 
 @router.get("/details/{emp_id}")
 def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
 
-    # ✅ 1. Get Employee FIRST
+    # ✅ 1. Employee
     emp = db.query(EmplyeeDB.Employee).filter(
         EmplyeeDB.Employee.Emp_id == emp_id
     ).first()
@@ -124,7 +124,7 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # ✅ 2. Get Provider using provider_id
+    # ✅ 2. Provider
     provider = db.query(PayRollProvider).filter(
         PayRollProvider.provider_id == emp.provider
     ).first()
@@ -135,52 +135,108 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
             detail=f"Provider '{emp.provider}' not found"
         )
 
-    base_salary = float(emp.annualSalary or 0) / 12
+    # ✅ 3. Provider Name
+    provider_name = provider.providername
 
-    earnings_list = []
-    deductions_list = []
+    # ✅ 4. Salary Mode (IMPORTANT)
+    # assume emp.salary_type = "monthly" or "yearly"
+    salary_type = getattr(emp, "salary_type", "yearly")
 
-    total_earnings = 0
-    total_deductions = 0
+    if salary_type == "monthly":
+        monthly_base = float(emp.annualSalary or 0)
+        yearly_base = monthly_base * 12
+    else:
+        yearly_base = float(emp.annualSalary or 0)
+        monthly_base = yearly_base / 12
 
-    # ✅ Earnings
+    # -----------------------------
+    # ✅ MONTHLY CALCULATION
+    # -----------------------------
+    earnings_month = []
+    deductions_month = []
+
+    total_earn_m = 0
+    total_ded_m = 0
+
     for earn in provider.earnings:
-        val = (base_salary * earn.value) / 100 if earn.type == "percentage" else earn.value
-        earnings_list.append({
+        val = (monthly_base * earn.value) / 100 if earn.type == "percentage" else earn.value
+        earnings_month.append({
             "name": earn.name,
-            "value": val
+            "value": round(val, 2)
         })
-        total_earnings += val
+        total_earn_m += val
 
-    # ❌ Deductions
     for ded in provider.deductions:
-        val = (base_salary * ded.value) / 100 if ded.type == "percentage" else ded.value
-        deductions_list.append({
+        val = (monthly_base * ded.value) / 100 if ded.type == "percentage" else ded.value
+        deductions_month.append({
             "name": ded.name,
-            "value": val
+            "value": round(val, 2)
         })
-        total_deductions += val
+        total_ded_m += val
 
-    gross_salary = base_salary + total_earnings
-    net_salary = gross_salary - total_deductions
+    gross_month = monthly_base + total_earn_m
+    net_month = gross_month - total_ded_m
 
+    # -----------------------------
+    # ✅ YEARLY CALCULATION
+    # -----------------------------
+    earnings_year = []
+    deductions_year = []
+
+    total_earn_y = total_earn_m * 12
+    total_ded_y = total_ded_m * 12
+
+    for e in earnings_month:
+        earnings_year.append({
+            "name": e["name"],
+            "value": round(e["value"] * 12, 2)
+        })
+
+    for d in deductions_month:
+        deductions_year.append({
+            "name": d["name"],
+            "value": round(d["value"] * 12, 2)
+        })
+
+    gross_year = gross_month * 12
+    net_year = net_month * 12
+
+    # -----------------------------
+    # ✅ FINAL RESPONSE
+    # -----------------------------
     return {
         "emp_id": emp_id,
-        "provider": emp.provider,
-        "base_salary": base_salary,
-        "earnings": earnings_list,
-        "deductions": deductions_list,
-        "gross_salary": gross_salary,
-        "net_salary": net_salary
-    }
+        "provider_id": emp.provider,
+        "provider_name": provider_name,
+        "salary_type": salary_type,
 
+        "monthly": {
+            "base_salary": round(monthly_base, 2),
+            "earnings": earnings_month,
+            "deductions": deductions_month,
+            "gross_salary": round(gross_month, 2),
+            "net_salary": round(net_month, 2)
+        },
+
+        "yearly": {
+            "base_salary": round(yearly_base, 2),
+            "earnings": earnings_year,
+            "deductions": deductions_year,
+            "gross_salary": round(gross_year, 2),
+            "net_salary": round(net_year, 2)
+        }
+    }
 
 
 @router.get("/")
 def get_all_employee_payroll(db: Session = Depends(get_db)):
 
     try:
-        employees = db.query(EmplyeeDB.Employee).all()
+        employees = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Status == "Active").all()
+        provider_name= {
+            provider.provider_id: provider.providername
+            for provider in db.query(PayRollProvider).all()
+        }
 
         result = []
 
@@ -190,10 +246,9 @@ def get_all_employee_payroll(db: Session = Depends(get_db)):
 
             monthly_salary = annual / 12
 
-            name = f"{emp.f_name or ''} {emp.l_name or ''}".strip()
-
             result.append({
     "emp_id": emp.Emp_id,
+    "provider_name": provider_name.get(emp.provider, "N/A"),
     "employee": f"{emp.f_name or ''} {emp.l_name or ''}".strip(),
     "department": emp.Department or "N/A",
     "net": monthly_salary,
