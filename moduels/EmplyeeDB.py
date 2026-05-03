@@ -17,7 +17,7 @@ class Employee(Base):
     dob = Column(Date, nullable=True)          
     phone = Column(String)
     email = Column(String)
-    Department = Column(String)
+    Department = Column(String, ForeignKey("departments.Dep_name"))
     designation = Column(String)
     emp_type = Column(String)
     DateOfJoining = Column(Date, nullable=True)  # nullable
@@ -71,6 +71,7 @@ class Employee(Base):
     leaves = relationship("LeaveDB", back_populates="employee", cascade="all, delete-orphan")
     leavehistory = relationship("LeaveHistoryDB", back_populates="employee", cascade="all, delete-orphan")
     payroll = relationship("Payroll", back_populates="employee", cascade="all, delete-orphan")
+    department = relationship("Department", back_populates="employees")
 
 class Education(Base):
     __tablename__ = "education"

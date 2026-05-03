@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func,select
 
 from Caluclation.IdCustom import generate_next_empid
-import moduels.EmplyeeDB as EmplyeeDB, Schemas.employee as employee
+import moduels.EmplyeeDB as EmplyeeDB, Schemas.employeeSceema as employeeSceema
 from database import get_db
 
 router = APIRouter(
@@ -35,7 +35,7 @@ net_salary = func.floor(
 ) / 100
 
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
-def create_employee(emp_in: employee.EmployeeCreate, db: Session = Depends(get_db)):
+def create_employee(emp_in: employeeSceema.EmployeeCreate, db: Session = Depends(get_db)):
     try:
         # 1. Generate the unique ID on the server
         new_generated_id = generate_next_empid(db)
@@ -192,7 +192,7 @@ def list_employees(db: Session = Depends(get_db)):
 
 # specific employee update endpoint
 @router.put("/EmployeeUpdate/{emp_id}") 
-def update_employee(emp_id: str, emp_in: employee.EmployeeCreate, db: Session = Depends(get_db)):
+def update_employee(emp_id: str, emp_in: employeeSceema.EmployeeCreate, db: Session = Depends(get_db)):
     emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     
     if not emp:
@@ -228,7 +228,7 @@ def get_employee_Familys(emp_id: str, db: Session = Depends(get_db)):
     return Familys
 
 @router.put("/EmployeeEducationUpdate/{emp_id}")
-def update_employee_education(emp_id: str, education_in: List[employee.EducationCreate], db: Session = Depends(get_db)):
+def update_employee_education(emp_id: str, education_in: List[employeeSceema.EducationCreate], db: Session = Depends(get_db)):
     emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -251,7 +251,7 @@ def update_employee_education(emp_id: str, education_in: List[employee.Education
         raise HTTPException(status_code=500, detail=str(e))
     
 @router.put("/EmployeeFamilysUpdate/{emp_id}")
-def update_employee_Familys(emp_id: str, Familys_in: List[employee.FamilyCreate], db: Session = Depends(get_db)):
+def update_employee_Familys(emp_id: str, Familys_in: List[employeeSceema.FamilyCreate], db: Session = Depends(get_db)):
     emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")

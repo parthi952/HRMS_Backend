@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
-import moduels.EmplyeeDB as EmplyeeDB, Schemas.employee as employee
+import moduels.EmplyeeDB as EmplyeeDB, Schemas.employeeSceema as employeeSceema
 from database import get_db
 
 router = APIRouter(
@@ -58,7 +58,7 @@ def get_all_leave_balances(db: Session = Depends(get_db)):
 # ✅ APPLY LEAVE (With Date Logic)
 # ==============================
 @router.post("/apply")
-def apply_leave(leave_his: employee.LeaveHistory, db: Session = Depends(get_db)):
+def apply_leave(leave_his: employeeSceema.LeaveHistory, db: Session = Depends(get_db)):
     # 1. Generate dates from duration
     days_count, f_date, t_date = get_leave_details(leave_his.Duration)
     
