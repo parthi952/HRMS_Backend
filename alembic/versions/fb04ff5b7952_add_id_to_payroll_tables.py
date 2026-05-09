@@ -47,6 +47,15 @@ def upgrade() -> None:
     op.drop_column('leavehistory', 'id')
     op.drop_index(op.f('ix_nominee_id'), table_name='nominee')
     op.drop_column('nominee', 'id')
+    # 1. Drop the foreign key constraint that depends on the index
+    # The name comes from your error: earnings_provider_id_fk_fkey
+    op.drop_constraint('earnings_provider_id_fk_fkey', 'earnings', type_='foreignkey')
+
+    # 2. Now drop the index (this is the line currently failing)
+    op.drop_index(op.f('ix_PayRollProviders_provider_id'), table_name='PayRollProviders')
+
+    # ... rest of the existing upgrade code ...
+
     # ### end Alembic commands ###
 
 
