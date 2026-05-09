@@ -1,8 +1,8 @@
 from pydantic import BaseModel
+from typing import Optional
 
 
-# ✅ CREATE schema (INPUT)
-class DepartmentCreate(BaseModel):
+class DepartmentBase(BaseModel):
     Dep_name: str
     Dep_head: str
     Dep_icon: str
@@ -10,9 +10,26 @@ class DepartmentCreate(BaseModel):
     icon_color: str
 
 
-# ✅ RESPONSE schema (OUTPUT)
-class DepartmentResponse(DepartmentCreate):
+class DepartmentCreate(DepartmentBase):
+    pass
+
+
+class DepartmentResponse(DepartmentBase):
     Dep_id: str
+    Total_employees: Optional[int] = 0
 
     class Config:
-        from_attributes = True   
+        from_attributes = True
+
+
+class DepartmentEmployeeItem(BaseModel):
+    Emp_id: str
+    name: str
+    designation: str
+    emp_type: str
+    email: str
+    phone: str
+    Status: str
+
+    class Config:
+        from_attributes = True
