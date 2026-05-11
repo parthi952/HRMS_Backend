@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from moduels import EmplyeeDB
 from moduels.payrollProvider import PayRollProvider, Earning, Deduction
-from Schemas.PayrollSchemas import PayRollProviderCreate, PayRollProviderOut
+from Schemas.PayrollSchemas import PayRollProviderCreate, PayRollProviderOut, PayrollCalculateRequest
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -275,3 +275,102 @@ def get_all_employee_payroll(db: Session = Depends(get_db)):
     except Exception as e:
         print("🔥 ERROR:", e)   # 👈 VERY IMPORTANT
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/calculate")
+def calculate_payroll(
+    payload: PayrollCalculateRequest,
+    db: Session = Depends(get_db)
+):
+
+    # ✅ Provider
+    provider = db.query(PayRollProvider).filter(
+        PayRollProvider.provider_id == payload.provider_id
+    ).first()
+
+    if not provider:
+        raise HTTPException(
+            status_code=404,
+            detail="Provider not found"
+        )
+
+    # -----------------------------
+    # BASE SALARY
+    # -----------------------------
+    if payload.salary_type == "monthly":
+        monthly_base = float(payload.salary)
+    else:
+        monthly_base = float(payload.salary) / 12
+
+    # -----------------------------
+    # EARNINGS
+    # -----------------------------
+    earnings = []
+    total_earnings = 0
+
+    for earn in provider.earnings:
+
+        amount = (
+            (monthly_base * earn.value) / 100
+            if earn.type == "percentage"
+            else earn.value
+        )
+
+        earnings.append({
+            "name": earn.name,
+            "type": earn.type,
+            "value": earn.value,
+            "amount": round(amount, 2)
+        })
+
+        total_earnings += amount
+
+    # -----------------------------
+    # DEDUCTIONS
+    # -----------------------------
+    deductions = []
+    total_deductions = 0
+
+    for ded in provider.deductions:
+
+        amount = (
+            (monthly_base * ded.value) / 100
+            if ded.type == "percentage"
+            else ded.value
+        )
+
+        deductions.append({
+            "name": ded.name,
+            "type": ded.type,
+            "value": ded.value,
+            "amount": round(amount, 2)
+        })
+
+        total_deductions += amount
+
+    # -----------------------------
+    # FINAL CALCULATION
+    # -----------------------------
+    gross = monthly_base + total_earnings
+
+    net = gross - total_deductions
+
+    # -----------------------------
+    # RESPONSE
+    # -----------------------------
+    return {
+        "provider_id": provider.provider_id,
+        "provider_name": provider.providername,
+
+        "baseSalary": round(monthly_base, 2),
+
+        "earnings": earnings,
+        "deductions": deductions,
+
+        "totalEarnings": round(total_earnings, 2),
+        "totalDeductions": round(total_deductions, 2),
+
+        "gross": round(gross, 2),
+        "net": round(net, 2)
+    }

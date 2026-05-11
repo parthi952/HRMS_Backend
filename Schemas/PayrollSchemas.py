@@ -71,3 +71,10 @@ class PayrollCreate(BaseModel):
 class PayrollOut(PayrollCreate):
     id: int
     model_config = ConfigDict(from_attributes=True)
+
+
+class PayrollCalculateRequest(BaseModel):
+    provider_id: str
+    salary: float
+    salary_type: str   # monthly / yearly
+

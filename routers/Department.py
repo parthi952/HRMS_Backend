@@ -53,16 +53,26 @@ def get_departments(db: Session = Depends(get_db)):
 # GET EMPLOYEES IN A DEPARTMENT
 # GET /departments/{dep_name}/employees
 # =====================================================
-@router.get("/{dep_name}/employees", response_model=List[DepartmentEmployeeItem])
-def get_employees_by_department(dep_name: str, db: Session = Depends(get_db)):
+@router.get("/{dep_id}/employees", response_model=List[DepartmentEmployeeItem])
+def get_employees_by_department(dep_id: str, db: Session = Depends(get_db)):
 
-    # fetch ALL employees then filter in Python
-    # — avoids SQL trim issues with spaces or encoding differences
+    # Find Department first
+    dept = (
+        db.query(DepartmentDB.Department)
+        .filter(DepartmentDB.Department.Dep_id == dep_id)
+        .first()
+    )
+
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+
+    # Fetch Employees
     all_employees = db.query(Employee).all()
 
     matched = [
         emp for emp in all_employees
-        if (emp.Department or "").strip().lower() == dep_name.strip().lower()
+        if (emp.Department or "").strip().lower()
+        == (dept.Dep_name or "").strip().lower()
     ]
 
     return [
@@ -77,8 +87,6 @@ def get_employees_by_department(dep_name: str, db: Session = Depends(get_db)):
         )
         for emp in matched
     ]
-
-
 # =====================================================
 # GET SINGLE DEPARTMENT
 # =====================================================
