@@ -3,50 +3,34 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func,select
+from sqlalchemy import func, select
 
 from Caluclation.IdCustom import generate_next_empid
-import moduels.EmplyeeDB as EmplyeeDB, Schemas.employeeSceema as employeeSceema
+import moduels.EmplyeeDB as EmplyeeDB
+import Schemas.employeeSceema as employeeSceema
 from database import get_db
 
-router = APIRouter(
-    prefix="/employee",
-    tags=["Employee"]
-)
+router = APIRouter(prefix="/employee", tags=["Employee"])
 
-monthly_basic = func.floor(
-    func.coalesce(EmplyeeDB.Employee.annualSalary / 12, 0) * 100
-) / 100
+from Caluclation.PayrollEandD import calculate_salary
+import moduels.payrollProvider as payrollProvider
 
-employee_pf = func.floor(
-    func.coalesce(monthly_basic * 0.12, 0) * 100
-) / 100
 
-employer_eps = func.floor(
-    func.coalesce(func.least(monthly_basic, 15000) * 0.0833, 0) * 100
-) / 100
+# ─── Employee CRUD ────────────────────────────────────────────────────────────
 
-employer_epf = func.floor(
-    func.coalesce(func.least(monthly_basic, 15000) * 0.0367, 0) * 100
-) / 100
-
-net_salary = func.floor(
-    func.coalesce(monthly_basic - employee_pf, 0) * 100
-) / 100
 
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
-def create_employee(emp_in: employeeSceema.EmployeeCreate, db: Session = Depends(get_db)):
+def create_employee(
+    emp_in: employeeSceema.EmployeeCreate, db: Session = Depends(get_db)
+):
     try:
-        # 1. Generate the unique ID on the server
         new_generated_id = generate_next_empid(db)
-        
-        # 2. Create the Employee record
+
         new_emp = EmplyeeDB.Employee(
             Emp_id=new_generated_id,
             f_name=emp_in.f_name,
             l_name=emp_in.l_name,
-            # Standard Python string concatenation is safer for object creation
-            name=f"{emp_in.f_name} {emp_in.l_name}", 
+            name=f"{emp_in.f_name} {emp_in.l_name}",
             gender=emp_in.gender,
             dob=emp_in.dob,
             phone=emp_in.phone,
@@ -85,120 +69,135 @@ def create_employee(emp_in: employeeSceema.EmployeeCreate, db: Session = Depends
             panNumber=emp_in.panNumber,
         )
         db.add(new_emp)
-        
-        # Flush sends the 'INSERT' to the DB so foreign keys work, 
-        # but it doesn't 'Commit' yet.
-        db.flush() 
+        db.flush()  # Get Employee PK before inserting children
 
-        # 3. Add Education using the generated ID
+        # ─── Education ───────────────────────────────────────────────────────
         for edu in emp_in.education:
-            db.add(EmplyeeDB.Education(
-                emp_id=new_generated_id,
-                degree=edu.degree,
-                institution=edu.institution,
-                graduationYear=edu.graduationYear,  
-            ))
+            db.add(
+                EmplyeeDB.Education(
+                    emp_id=new_generated_id,
+                    degree=edu.degree,
+                    institution=edu.institution,
+                    graduationYear=edu.graduationYear,
+                )
+            )
 
-        # 4. Add Nominees (Ensure these are linked correctly)
-        for nominee in emp_in.nominee:
-            db.add(EmplyeeDB.Nominees(
-                nominee_name=nominee.nominee_name,
-                nominee_aadhar=nominee.nominee_aadhar,
-                emp_id=new_generated_id
-                # If Nominee needs an Emp_id link, add it here
-            ))
-        
-        # 5. Add Work Experience
+        # ─── Work Experience ─────────────────────────────────────────────────
         for work in emp_in.WorkExp:
-            db.add(EmplyeeDB.WorkExpriance(
-                emp_id=new_generated_id,
-                company_name=work.company_name,
-                position=work.position,
-                FromDate=work.FromDate,
-                ToDate=work.ToDate
-            ))
-            
-        # 6. Add Family Details
+            db.add(
+                EmplyeeDB.WorkExpriance(
+                    emp_id=new_generated_id,
+                    company_name=work.company_name,
+                    position=work.position,
+                    FromDate=work.FromDate,
+                    ToDate=work.ToDate,
+                )
+            )
+
+        # ─── Family + Nominees ───────────────────────────────────────────────
+        # FIX: Nominees must be linked via family_id, NOT emp_id.
+        # We flush after each Family insert to get its auto-generated id,
+        # then use that id as the FK for every nominee under that family member.
         for dep in emp_in.Familys:
-            db.add(EmplyeeDB.Familys(
+            family_obj = EmplyeeDB.Familys(
                 emp_id=new_generated_id,
                 person_name=dep.person_name,
                 relationship_type=dep.relationship_type,
                 contact=dep.contact,
-                person_dob=dep.person_dob, 
-            ))
+                person_dob=dep.person_dob,
+            )
+            db.add(family_obj)
+            db.flush()  # ← family_obj.id is now available
+
+            for nom in dep.nominees:
+                if nom.nominee_name or nom.nominee_aadhar:  # skip empty rows
+                    db.add(
+                        EmplyeeDB.Nominees(
+                            family_id=family_obj.id,  # ✅ correct FK
+                            nominee_name=nom.nominee_name,
+                            nominee_aadhar=nom.nominee_aadhar,
+                        )
+                    )
 
         db.commit()
-        return {
-            "message": "Successfully created employee", 
-            "Emp_id": new_generated_id
-        }
+        return {"message": "Successfully created employee", "Emp_id": new_generated_id}
 
     except Exception as e:
         db.rollback()
         print(f"Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-    
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/next-id")
 def get_next_id(db: Session = Depends(get_db)):
     from Caluclation.IdCustom import generate_next_empid
-    
-    # This just predicts the ID based on current count + 1
+
     next_id = generate_next_empid(db)
-    
     return {"next_id": next_id}
 
 
-
-#employee get endpoint
 @router.get("/{emp_id}")
 def get_employee(emp_id: str, db: Session = Depends(get_db)):
-
-    stmt = select(
-        EmplyeeDB.Employee,
-        monthly_basic.label("monthly_salary"),
-        employee_pf.label("PF"),
-        employer_epf.label("EPF"),
-        employer_eps.label("EPS")
-    ).where(EmplyeeDB.Employee.Emp_id == emp_id)
-
-    result = db.execute(stmt).first()
-
-    if not result:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    emp, monthly_salary, PF, EPF, EPS = result
-
-    return {
-        "Employee": emp,
-        "monthly_salary": monthly_salary,
-        "PF": PF,
-        "EPF": EPF,
-        "EPS": EPS
-    }
-
-
-#Full Employee list endpoint
-@router.get("/")
-def list_employees(db: Session = Depends(get_db)):
-    employees_stmt = select(
-        EmplyeeDB.Employee
-    )
-
-    
-    employees=db.execute(employees_stmt).mappings().all()
-    return employees
-
-
-# specific employee update endpoint
-@router.put("/EmployeeUpdate/{emp_id}") 
-def update_employee(emp_id: str, emp_in: employeeSceema.EmployeeCreate, db: Session = Depends(get_db)):
+    """
+    Fetches employee details and calculates dynamic payroll based on 
+    assigned provider's earnings and deductions.
+    """
+    # Fetch employee basic info
     emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    update_data = emp_in.dict(exclude_unset=True)
 
+    # Calculate monthly base salary (annual / 12)
+    # Handle null/zero safely using coalesce-like logic
+    annual_salary = emp.annualSalary if emp.annualSalary else 0.0
+    base_salary = annual_salary / 12
+
+    # Fetch dynamic payroll components from provider
+    # Provider ID is stored in emp.provider
+    earnings = []
+    deductions = []
+    
+    if emp.provider:
+        provider = db.query(payrollProvider.PayRollProvider).filter(
+            payrollProvider.PayRollProvider.provider_id == emp.provider
+        ).first()
+        
+        if provider:
+            earnings = provider.earnings
+            deductions = provider.deductions
+
+    # Perform dynamic calculation
+    payroll_results = calculate_salary(base_salary, earnings, deductions)
+
+    # Return unified response
+    return {
+        "Employee": emp,
+        **payroll_results
+    }
+
+
+
+@router.get("/")
+def list_employees(db: Session = Depends(get_db)):
+    stmt = select(EmplyeeDB.Employee)
+    employees = db.execute(stmt).mappings().all()
+    return employees
+
+
+@router.put("/EmployeeUpdate/{emp_id}")
+def update_employee(
+    emp_id: str,
+    emp_in: employeeSceema.EmployeeCreate,
+    db: Session = Depends(get_db),
+):
+    emp = (
+        db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    )
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    update_data = emp_in.dict(exclude_unset=True)
     for key, value in update_data.items():
         if key == "Emp_id" or isinstance(value, list):
             continue
@@ -211,61 +210,197 @@ def update_employee(emp_id: str, emp_in: employeeSceema.EmployeeCreate, db: Sess
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    
-    # Education and Familys get and update logic here if needed, currently they are not updated in this endpoint.
+
+
+# ─── Education ────────────────────────────────────────────────────────────────
+
+
 @router.get("/EmployeeEducation/{emp_id}")
 def get_employee_education(emp_id: str, db: Session = Depends(get_db)):
-    education = db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).all()
+    education = (
+        db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).all()
+    )
     if not education:
-        raise HTTPException(status_code=404, detail="Education details not found for this employee")
+        raise HTTPException(
+            status_code=404, detail="Education details not found for this employee"
+        )
     return education
 
-@router.get("/EmployeeFamilys/{emp_id}")
-def get_employee_Familys(emp_id: str, db: Session = Depends(get_db)):
-    Familys = db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).all()
-    if not Familys:
-        raise HTTPException(status_code=404, detail="Family details not found for this employee")
-    return Familys
 
-@router.put("/EmployeeEducationUpdate/{emp_id}")
-def update_employee_education(emp_id: str, education_in: List[employeeSceema.EducationCreate], db: Session = Depends(get_db)):
-    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+@router.post("/EmployeeEducationCreate/{emp_id}", status_code=status.HTTP_201_CREATED)
+def create_employee_education(
+    emp_id: str,
+    education_in: List[employeeSceema.EducationCreate],
+    db: Session = Depends(get_db),
+):
+    emp = (
+        db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    )
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).delete()
-    
+
     for edu in education_in:
-        db.add(EmplyeeDB.Education(
-            emp_id=emp_id,
-            degree=edu.degree,
-            institution=edu.institution,
-            graduationYear=edu.graduationYear,  
-        ))
+        db.add(
+            EmplyeeDB.Education(
+                emp_id=emp_id,
+                degree=edu.degree,
+                institution=edu.institution,
+                graduationYear=edu.graduationYear,
+            )
+        )
 
     try:
         db.commit()
-        return {"message": f"Successfully updated education details for employee {emp_id}"}
+        return {"message": f"Education details created for employee {emp_id}"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    
-@router.put("/EmployeeFamilysUpdate/{emp_id}")
-def update_employee_Familys(emp_id: str, Familys_in: List[employeeSceema.FamilyCreate], db: Session = Depends(get_db)):
-    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+
+
+@router.put("/EmployeeEducationUpdate/{emp_id}")
+def update_employee_education(
+    emp_id: str,
+    education_in: List[employeeSceema.EducationCreate],
+    db: Session = Depends(get_db),
+):
+    emp = (
+        db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    )
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).delete()
-    
+
+    existing = (
+        db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).all()
+    )
+    if not existing:
+        raise HTTPException(
+            status_code=404,
+            detail="No education records found — use POST /EmployeeEducationCreate instead",
+        )
+
+    db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).delete()
+
+    for edu in education_in:
+        db.add(
+            EmplyeeDB.Education(
+                emp_id=emp_id,
+                degree=edu.degree,
+                institution=edu.institution,
+                graduationYear=edu.graduationYear,
+            )
+        )
+
+    try:
+        db.commit()
+        return {
+            "message": f"Successfully updated education details for employee {emp_id}"
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Family ───────────────────────────────────────────────────────────────────
+
+
+@router.get("/EmployeeFamilys/{emp_id}")
+def get_employee_Familys(emp_id: str, db: Session = Depends(get_db)):
+    Familys = (
+        db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).all()
+    )
+    if not Familys:
+        raise HTTPException(
+            status_code=404, detail="Family details not found for this employee"
+        )
+    return Familys
+
+
+@router.post("/EmployeeFamilysCreate/{emp_id}", status_code=status.HTTP_201_CREATED)
+def create_employee_Familys(
+    emp_id: str,
+    Familys_in: List[employeeSceema.FamilyCreate],
+    db: Session = Depends(get_db),
+):
+    emp = (
+        db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    )
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
     for dep in Familys_in:
-        db.add(EmplyeeDB.Familys(
+        family_obj = EmplyeeDB.Familys(
             emp_id=emp_id,
             person_name=dep.person_name,
             relationship_type=dep.relationship_type,
             contact=dep.contact,
-            person_dob=dep.person_dob, 
-        ))
+            person_dob=dep.person_dob,
+        )
+        db.add(family_obj)
+        db.flush()
+
+        for nom in dep.nominees:
+            if nom.nominee_name or nom.nominee_aadhar:
+                db.add(
+                    EmplyeeDB.Nominees(
+                        family_id=family_obj.id,
+                        nominee_name=nom.nominee_name,
+                        nominee_aadhar=nom.nominee_aadhar,
+                    )
+                )
+
+    try:
+        db.commit()
+        return {"message": f"Family details created for employee {emp_id}"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/EmployeeFamilysUpdate/{emp_id}")
+def update_employee_Familys(
+    emp_id: str,
+    Familys_in: List[employeeSceema.FamilyCreate],
+    db: Session = Depends(get_db),
+):
+    emp = (
+        db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    )
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    existing = (
+        db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).all()
+    )
+    if not existing:
+        raise HTTPException(
+            status_code=404,
+            detail="No family records found — use POST /EmployeeFamilysCreate instead",
+        )
+
+    # Delete old families (cascade will delete their nominees too)
+    db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).delete()
+    db.flush()
+
+    for dep in Familys_in:
+        family_obj = EmplyeeDB.Familys(
+            emp_id=emp_id,
+            person_name=dep.person_name,
+            relationship_type=dep.relationship_type,
+            contact=dep.contact,
+            person_dob=dep.person_dob,
+        )
+        db.add(family_obj)
+        db.flush()
+
+        for nom in dep.nominees:
+            if nom.nominee_name or nom.nominee_aadhar:
+                db.add(
+                    EmplyeeDB.Nominees(
+                        family_id=family_obj.id,
+                        nominee_name=nom.nominee_name,
+                        nominee_aadhar=nom.nominee_aadhar,
+                    )
+                )
 
     try:
         db.commit()
@@ -273,7 +408,86 @@ def update_employee_Familys(emp_id: str, Familys_in: List[employeeSceema.FamilyC
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-# In routers/employee.py
 
+# ─── Work Experience ─────────────────────────────────────────────────────────
+
+
+@router.get("/EmployeeWorkExp/{emp_id}")
+def get_employee_work_exp(emp_id: str, db: Session = Depends(get_db)):
+    work = (
+        db.query(EmplyeeDB.WorkExpriance)
+        .filter(EmplyeeDB.WorkExpriance.emp_id == emp_id)
+        .all()
+    )
+    if not work:
+        raise HTTPException(status_code=404, detail="Work experience details not found")
+    return work
+
+
+@router.post("/EmployeeWorkExpCreate/{emp_id}", status_code=status.HTTP_201_CREATED)
+def create_employee_work_exp(
+    emp_id: str,
+    work_in: List[employeeSceema.WorkExpCreate],
+    db: Session = Depends(get_db),
+):
+    emp = (
+        db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    )
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    for w in work_in:
+        db.add(
+            EmplyeeDB.WorkExpriance(
+                emp_id=emp_id,
+                company_name=w.company_name,
+                position=w.position,
+                FromDate=w.FromDate,
+                ToDate=w.ToDate,
+            )
+        )
+
+    try:
+        db.commit()
+        return {"message": f"Work experience details created for employee {emp_id}"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/EmployeeWorkExpUpdate/{emp_id}")
+def update_employee_work_exp(
+    emp_id: str,
+    work_in: List[employeeSceema.WorkExpCreate],
+    db: Session = Depends(get_db),
+):
+    emp = (
+        db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    )
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    db.query(EmplyeeDB.WorkExpriance).filter(
+        EmplyeeDB.WorkExpriance.emp_id == emp_id
+    ).delete()
+
+    for w in work_in:
+        db.add(
+            EmplyeeDB.WorkExpriance(
+                emp_id=emp_id,
+                company_name=w.company_name,
+                position=w.position,
+                FromDate=w.FromDate,
+                ToDate=w.ToDate,
+            )
+        )
+
+    try:
+        db.commit()
+        return {
+            "message": f"Successfully updated work experience for employee {emp_id}"
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

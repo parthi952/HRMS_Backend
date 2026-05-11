@@ -233,27 +233,42 @@ def get_all_employee_payroll(db: Session = Depends(get_db)):
 
     try:
         employees = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Status == "Active").all()
-        provider_name= {
-            provider.provider_id: provider.providername
-            for provider in db.query(PayRollProvider).all()
-        }
+        # Pre-fetch all providers to avoid N+1 queries
+        providers = db.query(PayRollProvider).all()
+        provider_map = {p.provider_id: p for p in providers}
 
         result = []
-
         for emp in employees:
-
             annual = float(emp.annualSalary or 0)
+            salary_type = getattr(emp, "salary_type", "yearly")
+            
+            if salary_type == "monthly":
+                monthly_base = annual
+            else:
+                monthly_base = annual / 12
 
-            monthly_salary = annual / 12
+            # Calculate Net if provider exists
+            net_pay = monthly_base
+            provider = provider_map.get(emp.provider)
+            if provider:
+                total_earn = 0
+                total_ded = 0
+                for earn in provider.earnings:
+                    val = (monthly_base * earn.value) / 100 if earn.type == "percentage" else earn.value
+                    total_earn += val
+                for ded in provider.deductions:
+                    val = (monthly_base * ded.value) / 100 if ded.type == "percentage" else ded.value
+                    total_ded += val
+                net_pay = (monthly_base + total_earn) - total_ded
 
             result.append({
-    "emp_id": emp.Emp_id,
-    "provider_name": provider_name.get(emp.provider, "N/A"),
-    "employee": f"{emp.f_name or ''} {emp.l_name or ''}".strip(),
-    "department": emp.Department or "N/A",
-    "net": monthly_salary,
-    "status": "Pending"
-})
+                "emp_id": emp.Emp_id,
+                "provider_name": provider.providername if provider else "N/A",
+                "employee": f"{emp.f_name or ''} {emp.l_name or ''}".strip(),
+                "department": emp.Department or "N/A",
+                "net": round(net_pay, 2),
+                "status": "Pending"
+            })
 
         return result
 

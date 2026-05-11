@@ -6,18 +6,16 @@ from database import Base
 class Employee(Base):
     __tablename__ = "employees"
 
-    Emp_id = Column(String, unique=True, primary_key=True, nullable=False)
-    f_name = Column(String)
-    l_name = Column(String)
-    name   = Column(String)
-    gender = Column(String)
-    dob    = Column(Date, nullable=True)
-    phone  = Column(String)
-    email  = Column(String)
+    Emp_id        = Column(String, unique=True, primary_key=True, nullable=False)
+    f_name        = Column(String)
+    l_name        = Column(String)
+    name          = Column(String)
+    gender        = Column(String)
+    dob           = Column(Date, nullable=True)
+    phone         = Column(String)
+    email         = Column(String)
 
-    # FK → departments.Dep_name  (we store "IT", "Digital Marketing", etc.)
-    Department = Column(String, ForeignKey("departments.Dep_name"))
-
+    Department    = Column(String, ForeignKey("departments.Dep_name"))
     designation   = Column(String)
     emp_type      = Column(String)
     DateOfJoining = Column(Date, nullable=True)
@@ -46,14 +44,14 @@ class Employee(Base):
     p_Pin_Code = Column(Integer)
 
     # Salary
-    provider             = Column(String)
-    payType              = Column(String)
-    currency             = Column(String)
-    payFrequency         = Column(String)
-    annualSalary         = Column(Float)
-    bonus_Type           = Column(String)
+    provider              = Column(String)
+    payType               = Column(String)
+    currency              = Column(String)
+    payFrequency          = Column(String)
+    annualSalary          = Column(Float)
+    bonus_Type            = Column(String)
     bonus_CalculationMode = Column(String)
-    bonus_Value          = Column(Float)
+    bonus_Value           = Column(Float)
 
     # Bank
     bankName      = Column(String)
@@ -61,24 +59,24 @@ class Employee(Base):
     ifscCode      = Column(String)
     panNumber     = Column(String)
 
-    education         = relationship("Education",      back_populates="employee", cascade="all, delete-orphan")
-    Familys           = relationship("Familys",        back_populates="employee", cascade="all, delete-orphan")
-    attendance_records= relationship("Attendance",     back_populates="employee", cascade="all, delete-orphan")
-    Work              = relationship("WorkExpriance",  back_populates="employee", cascade="all, delete-orphan")
-    leaves            = relationship("LeaveDB",        back_populates="employee", cascade="all, delete-orphan")
-    leavehistory      = relationship("LeaveHistoryDB", back_populates="employee", cascade="all, delete-orphan")
-    payroll           = relationship("Payroll",        back_populates="employee", cascade="all, delete-orphan")
-    department        = relationship("Department",     back_populates="employees")
+    education          = relationship("Education",      back_populates="employee", cascade="all, delete-orphan")
+    Familys            = relationship("Familys",        back_populates="employee", cascade="all, delete-orphan")
+    attendance_records = relationship("Attendance",     back_populates="employee", cascade="all, delete-orphan")
+    Work               = relationship("WorkExpriance",  back_populates="employee", cascade="all, delete-orphan")
+    leaves             = relationship("LeaveDB",        back_populates="employee", cascade="all, delete-orphan")
+    leavehistory       = relationship("LeaveHistoryDB", back_populates="employee", cascade="all, delete-orphan")
+    payroll            = relationship("Payroll",        back_populates="employee", cascade="all, delete-orphan")
+    department         = relationship("Department",     back_populates="employees")
 
 
 class Education(Base):
     __tablename__ = "education"
 
-    id            = Column(Integer, primary_key=True, index=True)
-    emp_id        = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
-    degree        = Column(String)
-    institution   = Column(String)
-    graduationYear= Column(Date, nullable=True)
+    id             = Column(Integer, primary_key=True, index=True)
+    emp_id         = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    degree         = Column(String)
+    institution    = Column(String)
+    graduationYear = Column(Date, nullable=True)
 
     employee = relationship("Employee", back_populates="education")
 
@@ -86,7 +84,8 @@ class Education(Base):
 class WorkExpriance(Base):
     __tablename__ = "Work"
 
-    emp_id       = Column(String, ForeignKey("employees.Emp_id"), primary_key=True, nullable=False)
+    id           = Column(Integer, primary_key=True, index=True)
+    emp_id       = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
     company_name = Column(String)
     position     = Column(String)
     FromDate     = Column(String)
@@ -106,13 +105,18 @@ class Familys(Base):
     person_dob        = Column(Date, nullable=True)
 
     employee = relationship("Employee", back_populates="Familys")
-    nominees = relationship("Nominees", back_populates="family")
+
+    # ✅ Cascade: deleting a Family row also deletes all its Nominees
+    nominees = relationship("Nominees", back_populates="family", cascade="all, delete-orphan")
 
 
 class Nominees(Base):
     __tablename__ = "nominee"
 
-    family_id      = Column(Integer, ForeignKey("Familys.id"), primary_key=True, nullable=False)
+    # FIX: Nominees are children of Familys, not of Employee directly.
+    # family_id is the correct FK — NOT emp_id.
+    id             = Column(Integer, primary_key=True, index=True)   # ✅ own PK so multiple nominees per family are allowed
+    family_id      = Column(Integer, ForeignKey("Familys.id"), nullable=False)
     nominee_name   = Column(String)
     nominee_aadhar = Column(String)
 
