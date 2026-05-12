@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
-import moduels.EmplyeeDB as EmplyeeDB, Schemas.employeeSceema as employeeSceema
+import module.EmplyeeDB as EmplyeeDB, Schemas.employeeSceema as employeeSceema
 from database import get_db
 
 router = APIRouter(

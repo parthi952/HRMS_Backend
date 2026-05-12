@@ -4,7 +4,7 @@ from typing import List
 from database import get_db
 
 # Unga models matrum schemas-a correct-a import panradhu
-from moduels.CustomIDDB import IDConfig
+from module.CustomIDDB import IDConfig
 from Schemas.CustomIDSchemas import CustomIDStore
 
 router = APIRouter(prefix="/CustomID", tags=["CustomID"])
@@ -14,8 +14,8 @@ router = APIRouter(prefix="/CustomID", tags=["CustomID"])
 def get_store(db: Session = Depends(get_db)):
     all_configs = db.query(IDConfig).all()
     
-    # React ethirpaakura { "EMP": [], "DEP": [] } structure-kku mathuradhu
-    store = {"EMP": [], "DEP": []}
+    # React ethirpaakura { "EMP": [], "DEP": [], "CAN": [], "INT": [] } structure-kku mathuradhu
+    store = {"EMP": [], "DEP": [], "CAN": [], "INT": [] }
     
     for item in all_configs:
         config_data = {
@@ -40,7 +40,6 @@ def sync_store(payload: CustomIDStore, db: Session = Depends(get_db)):
         
         # 2. Add new Employee configs
         for item in payload.EMP:
-            # .dict() will map id, prefix, separator, digit, isActive
             db_item = IDConfig(**item.dict(), category="EMP")
             db.add(db_item)
             
@@ -49,10 +48,20 @@ def sync_store(payload: CustomIDStore, db: Session = Depends(get_db)):
             db_item = IDConfig(**item.dict(), category="DEP")
             db.add(db_item)
             
+        # 4. Add new Candidate configs
+        for item in payload.CAN:
+            db_item = IDConfig(**item.dict(), category="CAN")
+            db.add(db_item)
+            
+        # 5. Add new Interview configs
+        for item in payload.INT:
+            db_item = IDConfig(**item.dict(), category="INT")
+            db.add(db_item)
+            
         db.commit()
         return {"status": "success", "message": "Database successfully synced"}
-        
+
     except Exception as e:
         db.rollback()
-        print(f"Error syncing: {e}") # Log error to terminal
+        print(f"Error syncing: {e}") 
         raise HTTPException(status_code=500, detail=str(e))

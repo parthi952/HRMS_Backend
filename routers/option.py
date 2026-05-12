@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 
-from moduels.OptionDB import OptionCategory, OptionItem
+from module.OptionDB import OptionCategory, OptionItem
 from Schemas.OptionSchema import OptionCategoryCreate, OptionCategoryResponse, OptionCategoryUpsert
 
 router = APIRouter(prefix="/options", tags=["Options"])

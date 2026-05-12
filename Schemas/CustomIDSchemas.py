@@ -5,7 +5,7 @@ class IDConfigBase(BaseModel):
     id: str
     prefix: str
     separator: str
-    digit: int  # Ensure this matches your frontend "degit" spelling if necessary
+    digit: int  
     isActive: bool
 
     class Config:
@@ -14,3 +14,5 @@ class IDConfigBase(BaseModel):
 class CustomIDStore(BaseModel):
     EMP: List[IDConfigBase]
     DEP: List[IDConfigBase]
+    CAN: List[IDConfigBase]
+    INT: List[IDConfigBase]

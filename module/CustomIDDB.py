@@ -6,7 +6,7 @@ class IDConfig(Base):
 
     # Use the long numeric string from image_afa65b.png as the primary key
     id = Column(String, primary_key=True, index=True) 
-    category = Column(String)  # This will be "EMP" or "DEP"
+    category = Column(String)  # This will be "EMP", "DEP", "CAN", or "INT"
     prefix = Column(String)
     separator = Column(String)
     digit = Column(Integer)

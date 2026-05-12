@@ -1,10 +1,10 @@
-import logging
+﻿import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
-from moduels import EmplyeeDB
-from moduels.payrollProvider import PayRollProvider, Earning, Deduction
+from module import EmplyeeDB
+from module.payrollProvider import PayRollProvider, Earning, Deduction
 from Schemas.PayrollSchemas import PayRollProviderCreate, PayRollProviderOut, PayrollCalculateRequest
 from typing import List
 

@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+﻿from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import date as date_type
 from typing import Dict, Any
-import moduels.EmplyeeDB as EmplyeeDB
+import module.EmplyeeDB as EmplyeeDB
 from database import get_db
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])

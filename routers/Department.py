@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
 
 from database import get_db
 
-import moduels.DepartmentDB as DepartmentDB
-from moduels.EmplyeeDB import Employee
+import module.DepartmentDB as DepartmentDB
+from module.EmplyeeDB import Employee
 
 from Schemas.DepartmentSchema import (
     DepartmentCreate,

@@ -1,16 +1,17 @@
- # <--- Add this import
+# <--- Add this import
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2 import Date
 from sqlalchemy.orm import Session
-from routers import CustomID, Department, PayRoll, employee
+from routers import CustomID, Department, PayRoll, employee, Candidate
 from routers import Attendance as att
 from routers import Leave
 from routers import option
 from contextlib import asynccontextmanager
 
 # Importing your local modules
-import moduels.EmplyeeDB as EmplyeeDB
+import module.EmplyeeDB as EmplyeeDB
+import module.CandidateDB as CandidateDB
 from database import engine, get_db
 
 
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
     EmplyeeDB.Base.metadata.create_all(bind=engine)
     yield
     print("Shutting down...")
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -34,9 +36,12 @@ app.add_middleware(
 
 # Router for Api
 
+
 @app.get("/")
 def read_root():
     return {"message": "Employee API is active"}
+
+
 # emmployee router
 app.include_router(employee.router)
 
@@ -52,3 +57,5 @@ app.include_router(option.router)
 app.include_router(Department.router)
 
 app.include_router(CustomID.router)
+
+app.include_router(Candidate.router)

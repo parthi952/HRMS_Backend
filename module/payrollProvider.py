@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Float
+﻿from sqlalchemy import Column, Integer, String, ForeignKey, Float
 from sqlalchemy.orm import relationship
-from moduels.PayrollDB import Payroll
+from module.PayrollDB import Payroll
 from database import Base
 
 

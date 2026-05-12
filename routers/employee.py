@@ -1,4 +1,4 @@
-from typing import List
+﻿from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -6,14 +6,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, select
 
 from Caluclation.IdCustom import generate_next_empid
-import moduels.EmplyeeDB as EmplyeeDB
+import module.EmplyeeDB as EmplyeeDB
 import Schemas.employeeSceema as employeeSceema
 from database import get_db
 
 router = APIRouter(prefix="/employee", tags=["Employee"])
 
 from Caluclation.PayrollEandD import calculate_salary
-import moduels.payrollProvider as payrollProvider
+import module.payrollProvider as payrollProvider
 
 
 # ─── Employee CRUD ────────────────────────────────────────────────────────────
