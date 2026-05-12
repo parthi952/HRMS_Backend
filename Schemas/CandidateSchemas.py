@@ -27,8 +27,14 @@ class InterviewBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     Interview_date: date
     Interview_time: time
-    Interview_status: str
-    Candidate_feedback: str
+    Interview_status: str # Round type
+    Stage_status: str = "Pending"
+    Interviewer_name: Optional[str] = None
+    Interview_score: Optional[float] = None
+    Interviewer_feedback: Optional[str] = None
+    Final_decision: Optional[str] = None
+    Rejection_reason: Optional[str] = None
+    Selected_date: Optional[datetime] = None
 
 class InterviewCreate(InterviewBase):
     Candidate_id: str
@@ -38,7 +44,13 @@ class InterviewUpdate(BaseModel):
     Interview_date: Optional[date] = None
     Interview_time: Optional[time] = None
     Interview_status: Optional[str] = None
-    Candidate_feedback: Optional[str] = None
+    Stage_status: Optional[str] = None
+    Interviewer_name: Optional[str] = None
+    Interview_score: Optional[float] = None
+    Interviewer_feedback: Optional[str] = None
+    Final_decision: Optional[str] = None
+    Rejection_reason: Optional[str] = None
+    Selected_date: Optional[datetime] = None
 
 class Interview(InterviewBase):
     id: int
@@ -57,6 +69,7 @@ class CandidateBase(BaseModel):
     Candidate_Source: str
     Resume_path: str
     Status: str
+    Current_Stage: str = "Applied"
 
 class CandidateCreate(CandidateBase):
     Candidate_id: Optional[str] = None
@@ -76,3 +89,11 @@ class Candidate(CandidateBase):
     Candidate_id: str
     stages: List[Stage] = []
     interviews: List[Interview] = []
+
+class BulkInterviewCreate(BaseModel):
+    Candidate_ids: List[str]
+    Interview_date: date
+    Interview_time: time
+    Interview_status: str # Round type
+    Interviewer_name: Optional[str] = None
+    Stage_status: str = "Pending"

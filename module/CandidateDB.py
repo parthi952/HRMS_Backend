@@ -16,6 +16,7 @@ class Candidate(Base):
     Candidate_Source = Column(String, nullable=False)
     Resume_path = Column(String, nullable=False)
     Status = Column(String, nullable=False)
+    Current_Stage = Column(String, default="Applied") # New field
 
     # Relationships
     stages = relationship("Stage_details", back_populates="candidate", cascade="all, delete-orphan")
@@ -31,15 +32,11 @@ class Stage_details(Base):
     Candidate_id = Column(String, ForeignKey("candidates.Candidate_id", ondelete="CASCADE"), nullable=False)
     Stage_id = Column(String, unique=True, index=True, nullable=False)
     Stage_name = Column(String, nullable=False)
-    Stage_status = Column(String, nullable=False)
+    Stage_status = Column(String, nullable=False) # Pending, In Progress, Completed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     candidate = relationship("Candidate", back_populates="stages")
-
-    def __repr__(self):
-        return f"<Stage_details(id={self.id}, stage='{self.Stage_name}', status='{self.Stage_status}')>"
-
 
 class Interview(Base):
     __tablename__ = "interview"
@@ -49,14 +46,17 @@ class Interview(Base):
     Candidate_id = Column(String, ForeignKey("candidates.Candidate_id", ondelete="CASCADE"), nullable=False)
     Interview_date = Column(Date, nullable=False)
     Interview_time = Column(Time, nullable=False)
-    Interview_status = Column(String, nullable=False)
-    Candidate_feedback = Column(String, nullable=False)
+    Interview_status = Column(String, nullable=False) # e.g., Technical, HR, Final
+    Stage_status = Column(String, default="Pending") # Pending, In Progress, Completed
+    Interviewer_name = Column(String, nullable=True)
+    Interview_score = Column(Float, nullable=True)
+    Interviewer_feedback = Column(String, nullable=True)
+    Final_decision = Column(String, nullable=True) # e.g., Passed, Failed
+    Rejection_reason = Column(String, nullable=True)
+    Selected_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     candidate = relationship("Candidate", back_populates="interviews")
-
-    def __repr__(self):
-        return f"<Interview(id={self.id}, date='{self.Interview_date}', status='{self.Interview_status}')>"
 
 
