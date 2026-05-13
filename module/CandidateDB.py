@@ -1,62 +1,122 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Float, Date, Time, DateTime
-from sqlalchemy.sql import func
+# models.py
+
+from sqlalchemy import Column, Integer, String, ForeignKey, Date, Time, Float
+
 from sqlalchemy.orm import relationship
+
 from database import Base
 
+
+# =========================================================
+# CANDIDATE TABLE
+# =========================================================
+
+
 class Candidate(Base):
+
     __tablename__ = "candidates"
 
-    id = Column(Integer, primary_key=True, index=True)
-    Candidate_id = Column(String, unique=True, index=True, nullable=False)
-    Candidate_name = Column(String, nullable=False)
-    Job_title = Column(String, nullable=False)
-    Candidate_Phone = Column(String, nullable=False)
-    Candidate_Email = Column(String, nullable=False)
-    Candidate_Skills = Column(String, nullable=False)
-    Candidate_Source = Column(String, nullable=False)
-    Resume_path = Column(String, nullable=False)
-    Status = Column(String, nullable=False)
-    Current_Stage = Column(String, default="Applied") # New field
+    id = Column(Integer, primary_key=True)
 
-    # Relationships
-    stages = relationship("Stage_details", back_populates="candidate", cascade="all, delete-orphan")
-    interviews = relationship("Interview", back_populates="candidate", cascade="all, delete-orphan")
+    Candidate_ID = Column(String, unique=True)
 
-    def __repr__(self):
-        return f"<Candidate(id={self.id}, name='{self.Candidate_name}', status='{self.Status}')>"
+    Candidate_name = Column(String)
 
-class Stage_details(Base):
-    __tablename__ = "stage_details"
+    Job_title = Column(String)
 
-    id = Column(Integer, primary_key=True, index=True)
-    Candidate_id = Column(String, ForeignKey("candidates.Candidate_id", ondelete="CASCADE"), nullable=False)
-    Stage_id = Column(String, unique=True, index=True, nullable=False)
-    Stage_name = Column(String, nullable=False)
-    Stage_status = Column(String, nullable=False) # Pending, In Progress, Completed
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    Candidate_Email = Column(String)
 
-    # Relationships
-    candidate = relationship("Candidate", back_populates="stages")
+    Candidate_Phone = Column(String)
+
+    Resume_path = Column(String)
+
+    # Applied / Interview / Selected / Rejected
+    Candidate_status = Column(
+        String,
+        default="Applied"
+    )
+
+    stages = relationship(
+        "CandidateStage",
+        back_populates="candidate"
+    )
+# =========================================================
+# STAGE MASTER TABLE
+# =========================================================
+
+
+class Stage(Base):
+
+    __tablename__ = "stages"
+
+    id = Column(Integer, primary_key=True)
+
+    Stage_name = Column(String)
+
+    Stage_index = Column(Integer)
+
+
+# =========================================================
+# CANDIDATE STAGE TABLE
+# =========================================================
+
+class CandidateStage(Base):
+
+    __tablename__ = "candidate_stages"
+
+    id = Column(Integer, primary_key=True)
+
+    candidate_id = Column(
+        Integer,
+        ForeignKey("candidates.id")
+    )
+
+    stage_id = Column(
+        Integer,
+        ForeignKey("stages.id")
+    )
+
+    # Pending / In Progress / Completed / Rejected
+    Stage_status = Column(
+        String,
+        default="Pending"
+    )
+
+    candidate = relationship(
+        "Candidate",
+        back_populates="stages"
+    )
+
+    stage = relationship("Stage")
+# =========================================================
+# INTERVIEW TABLE
+# =========================================================
 
 class Interview(Base):
-    __tablename__ = "interview"
 
-    id = Column(Integer, primary_key=True, index=True)
-    Interview_id = Column(String, unique=True, index=True, nullable=False)
-    Candidate_id = Column(String, ForeignKey("candidates.Candidate_id", ondelete="CASCADE"), nullable=False)
-    Interview_date = Column(Date, nullable=False)
-    Interview_time = Column(Time, nullable=False)
-    Interview_status = Column(String, nullable=False) # e.g., Technical, HR, Final
-    Stage_status = Column(String, default="Pending") # Pending, In Progress, Completed
-    Interviewer_name = Column(String, nullable=True)
-    Interview_score = Column(Float, nullable=True)
-    Interviewer_feedback = Column(String, nullable=True)
-    Final_decision = Column(String, nullable=True) # e.g., Passed, Failed
-    Rejection_reason = Column(String, nullable=True)
-    Selected_date = Column(DateTime, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __tablename__ = "interviews"
 
-    # Relationships
-    candidate = relationship("Candidate", back_populates="interviews")
+    id = Column(Integer, primary_key=True)
 
+    candidate_id = Column(
+        Integer,
+        ForeignKey("candidates.id")
+    )
 
+    stage_id = Column(
+        Integer,
+        ForeignKey("stages.id")
+    )
+
+    Interview_status = Column(
+        String,
+        default="Scheduled"
+    )
+
+    Interview_date = Column(Date)
+
+    Interview_time = Column(Time)
+
+    candidate = relationship("Candidate")
+
+    stage = relationship("Stage")

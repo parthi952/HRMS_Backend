@@ -51,7 +51,7 @@ def generate_next_candidate_id(db: Session):
     separator = config.separator if config else "-"
     digit = config.digit if config else 4
     
-    count = db.query(func.count(CandidateDB.Candidate.Candidate_id)).scalar()
+    count = db.query(func.count(CandidateDB.Candidate.Candidate_code)).scalar()
     next_num = (count or 0) + 1
     
     return f"{prefix}{separator}{str(next_num).zfill(digit)}"
@@ -63,7 +63,7 @@ def generate_next_interview_id(db: Session):
     separator = config.separator if config else "-"
     digit = config.digit if config else 4
     
-    count = db.query(func.count(CandidateDB.Interview.Interview_id)).scalar()
+    count = db.query(func.count(CandidateDB.Interview.Interview_code)).scalar()
     next_num = (count or 0) + 1
     
     return f"{prefix}{separator}{str(next_num).zfill(digit)}"

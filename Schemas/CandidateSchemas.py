@@ -1,99 +1,103 @@
-from pydantic import BaseModel, ConfigDict
-from typing import List, Optional
+# schemas.py
+
+from pydantic import BaseModel, ConfigDict, field_validator
+from typing import Optional, List
 from datetime import date, time, datetime
 
-# --- Stage Details Schemas ---
+
+# -----------------------------
+# Stage Master
+# -----------------------------
+
 class StageBase(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
     Stage_name: str
-    Stage_status: str
+    Stage_index: int
 
-class StageCreate(StageBase):
-    Candidate_id: str
-    Stage_id: Optional[str] = None # Optional if generated
-
-class StageUpdate(BaseModel):
-    Stage_name: Optional[str] = None
-    Stage_status: Optional[str] = None
-
-class Stage(StageBase):
-    id: int
-    Candidate_id: str
-    Stage_id: str
-    created_at: datetime
-
-# --- Interview Schemas ---
-class InterviewBase(BaseModel):
+class StageResponse(StageBase):
     model_config = ConfigDict(from_attributes=True)
-    Interview_date: date
-    Interview_time: time
-    Interview_status: str # Round type
-    Stage_status: str = "Pending"
-    Interviewer_name: Optional[str] = None
-    Interview_score: Optional[float] = None
-    Interviewer_feedback: Optional[str] = None
-    Final_decision: Optional[str] = None
-    Rejection_reason: Optional[str] = None
-    Selected_date: Optional[datetime] = None
-
-class InterviewCreate(InterviewBase):
-    Candidate_id: str
-    Interview_id: Optional[str] = None
-
-class InterviewUpdate(BaseModel):
-    Interview_date: Optional[date] = None
-    Interview_time: Optional[time] = None
-    Interview_status: Optional[str] = None
-    Stage_status: Optional[str] = None
-    Interviewer_name: Optional[str] = None
-    Interview_score: Optional[float] = None
-    Interviewer_feedback: Optional[str] = None
-    Final_decision: Optional[str] = None
-    Rejection_reason: Optional[str] = None
-    Selected_date: Optional[datetime] = None
-
-class Interview(InterviewBase):
     id: int
-    Candidate_id: str
-    Interview_id: str
-    created_at: datetime
 
-# --- Candidate Schemas ---
+# -----------------------------
+# Candidate
+# -----------------------------
+
 class CandidateBase(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
     Candidate_name: str
     Job_title: str
-    Candidate_Phone: str
     Candidate_Email: str
-    Candidate_Skills: str
-    Candidate_Source: str
-    Resume_path: str
-    Status: str
-    Current_Stage: str = "Applied"
+    Candidate_Phone: str
+    Resume_path: Optional[str] = None
 
 class CandidateCreate(CandidateBase):
-    Candidate_id: Optional[str] = None
+    pass
+
+class CandidateResponse(CandidateBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    Candidate_ID: str # Alphanumeric code
+    Candidate_status: str
+    current_candidate_stage: Optional[str] = None # Calculated dynamically in router
 
 class CandidateUpdate(BaseModel):
     Candidate_name: Optional[str] = None
     Job_title: Optional[str] = None
-    Candidate_Phone: Optional[str] = None
     Candidate_Email: Optional[str] = None
-    Candidate_Skills: Optional[str] = None
-    Candidate_Source: Optional[str] = None
+    Candidate_Phone: Optional[str] = None
     Resume_path: Optional[str] = None
-    Status: Optional[str] = None
+    Candidate_status: Optional[str] = None
 
-class Candidate(CandidateBase):
-    id: int
-    Candidate_id: str
-    stages: List[Stage] = []
-    interviews: List[Interview] = []
+# -----------------------------
+# Interview
+# -----------------------------
 
-class BulkInterviewCreate(BaseModel):
-    Candidate_ids: List[str]
+class InterviewCreate(BaseModel):
+    candidate_id: int
+    stage_id: int
     Interview_date: date
     Interview_time: time
-    Interview_status: str # Round type
-    Interviewer_name: Optional[str] = None
-    Stage_status: str = "Pending"
+
+class InterviewUpdate(BaseModel):
+    Interview_status: Optional[str] = None
+    Interview_score: Optional[float] = None
+    Interview_feedback: Optional[str] = None
+    Final_decision: Optional[str] = None
+    Rejection_reason: Optional[str] = None
+
+class InterviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    candidate_id: int
+    stage_id: int
+    Interview_status: str
+    Interview_date: date
+    Interview_time: time
+    
+    # Optional nested data for UI
+    candidate_name: Optional[str] = None
+    candidate_role: Optional[str] = None
+    Candidate_ID: Optional[str] = None
+    current_candidate_stage: Optional[str] = None
+
+class BulkInterviewCreate(BaseModel):
+    Candidate_ids: List[int]
+    Stage_name: str
+    Interview_date: date
+    Interview_time: time
+    Interviewer_name: Optional[str] = "HR Team"
+
+# -----------------------------
+# Candidate Stage
+# -----------------------------
+
+class CandidateStageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    candidate_id: int
+    stage_id: int
+    Stage_status: str
+    
+    # Optional nested data
+    Stage_name: Optional[str] = None

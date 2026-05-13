@@ -1,4 +1,4 @@
-﻿from logging.config import fileConfig
+from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -15,8 +15,14 @@ load_dotenv()
 
 
 from database import DATABASE_URL, Base
-import module.EmplyeeDB as EmplyeeDB  # Import your models here to ensure they are registered with SQLAlchemy's metadata
- # Import your models here
+import module.EmplyeeDB
+import module.DepartmentDB
+import module.CandidateDB
+import module.CustomIDDB
+import module.OptionDB
+import module.PayrollDB
+import module.payrollProvider
+# Import any other models as needed
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -70,8 +76,12 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # Override the URL from alembic.ini with the one from our environment
+    configuration = config.get_section(config.config_ini_section, {})
+    configuration["sqlalchemy.url"] = DATABASE_URL
+    
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

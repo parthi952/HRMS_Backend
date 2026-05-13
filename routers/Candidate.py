@@ -1,183 +1,422 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from database import get_db
 import module.CandidateDB as CandidateDB
 import Schemas.CandidateSchemas as CandidateSchemas
-from Caluclation.IdCustom import generate_next_candidate_id, generate_next_interview_id
 
 router = APIRouter(prefix="/candidates", tags=["Candidates"])
 
-@router.get("/GetAllInterviews", response_model=List[CandidateSchemas.Interview])
-def list_all_interviews(db: Session = Depends(get_db)):
-    return db.query(CandidateDB.Interview).all()
+# --- Helper Functions ---
+
+
+def get_current_stage(db: Session, candidate_id: int):
+    """Calculates current stage from CandidateStage table"""
+    current = (
+        db.query(CandidateDB.CandidateStage)
+        .filter(
+            CandidateDB.CandidateStage.candidate_id == candidate_id,
+            CandidateDB.CandidateStage.Stage_status == "In Progress",
+        )
+        .first()
+    )
+    if current and current.stage:
+        return current.stage.Stage_name
+    return "Applied"
+
+
+# --- Stage Master Endpoints ---
+
+
+@router.post("/stages/master", response_model=CandidateSchemas.StageResponse)
+def create_stage(stage_in: CandidateSchemas.StageBase, db: Session = Depends(get_db)):
+    db_stage = CandidateDB.Stage(**stage_in.dict())
+    db.add(db_stage)
+    db.commit()
+    db.refresh(db_stage)
+    return db_stage
+
+
+@router.get("/stages/master", response_model=List[CandidateSchemas.StageResponse])
+def get_all_stages(db: Session = Depends(get_db)):
+    return db.query(CandidateDB.Stage).order_by(CandidateDB.Stage.Stage_index).all()
+
 
 # --- Candidate CRUD ---
 
+
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
-def create_candidate(candidate_in: CandidateSchemas.CandidateCreate, db: Session = Depends(get_db)):
+def create_candidate(
+    candidate_in: CandidateSchemas.CandidateCreate, db: Session = Depends(get_db)
+):
     try:
-        # Use provided ID or generate a new one
-        new_id = candidate_in.Candidate_id or generate_next_candidate_id(db)
-        
-        # Filter out Candidate_id from the dict to avoid duplication if it's in the schema
-        candidate_data = candidate_in.dict(exclude={"Candidate_id"})
-        
+        # 1. Generate internal ID code (e.g. CAN-0001)
+        from Caluclation.IdCustom import generate_next_candidate_id
+
+        new_code = generate_next_candidate_id(db)
+
+        # 2. Create Candidate
         db_candidate = CandidateDB.Candidate(
-            Candidate_id=new_id,
-            **candidate_data
+            Candidate_ID=new_code, Candidate_status="Applied", **candidate_in.dict()
         )
         db.add(db_candidate)
+        db.flush()  # Get ID
+
+        # 3. Find First Stage from Master
+        first_stage_master = (
+            db.query(CandidateDB.Stage).order_by(CandidateDB.Stage.Stage_index).first()
+        )
+
+        if not first_stage_master:
+            raise HTTPException(400, "No recruitment stages configured in Stage Master")
+
+        # 4. Create first CandidateStage (In Progress)
+        new_candidate_stage = CandidateDB.CandidateStage(
+            candidate_id=db_candidate.id,
+            stage_id=first_stage_master.id,
+            Stage_status="In Progress",
+        )
+        db.add(new_candidate_stage)
+
+        # 5. Create first Interview
+        new_interview = CandidateDB.Interview(
+            candidate_id=db_candidate.id,
+            stage_id=first_stage_master.id,
+            Interview_status="Scheduled",
+        )
+        db.add(new_interview)
+
         db.commit()
-        db.refresh(db_candidate)
-        return {"message": "Candidate registered successfully", "Candidate_id": new_id}
+        return {
+            "message": "Candidate registered and screening round created",
+            "Candidate_ID": new_code,
+            "id": db_candidate.id,
+        }
     except Exception as e:
         db.rollback()
-        print(f"Error registering candidate: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/all", response_model=List[CandidateSchemas.Candidate])
-def list_candidates(db: Session = Depends(get_db)):
-    return db.query(CandidateDB.Candidate).all()
 
-@router.get("/{candidate_id}", response_model=CandidateSchemas.Candidate)
-def get_candidate(candidate_id: str, db: Session = Depends(get_db)):
-    candidate = db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.Candidate_id == candidate_id).first()
+@router.get("/all", response_model=List[CandidateSchemas.CandidateResponse])
+def list_candidates(db: Session = Depends(get_db)):
+    candidates = db.query(CandidateDB.Candidate).all()
+
+    # Inject dynamic current stage
+    results = []
+    for c in candidates:
+        data = CandidateSchemas.CandidateResponse.from_orm(c)
+        data.current_candidate_stage = get_current_stage(db, c.id)
+        results.append(data)
+
+    return results
+
+
+@router.get("/{id}", response_model=CandidateSchemas.CandidateResponse)
+def get_candidate(id: int, db: Session = Depends(get_db)):
+    candidate = (
+        db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.id == id).first()
+    )
     if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+        raise HTTPException(404, "Candidate not found")
+
+    data = CandidateSchemas.CandidateResponse.from_orm(candidate)
+    data.current_candidate_stage = get_current_stage(db, candidate.id)
+    return data
+
+
+@router.put("/Update/{id}")
+def update_candidate(
+    id: int,
+    candidate_in: CandidateSchemas.CandidateUpdate,
+    db: Session = Depends(get_db),
+):
+    candidate = (
+        db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.id == id).first()
+    )
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+
+    update_data = candidate_in.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(candidate, key, value)
+
+    db.commit()
+    db.refresh(candidate)
     return candidate
 
-@router.put("/Update/{candidate_id}")
-def update_candidate(candidate_id: str, candidate_in: CandidateSchemas.CandidateUpdate, db: Session = Depends(get_db)):
-    db_candidate = db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.Candidate_id == candidate_id).first()
-    if not db_candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    
-    update_data = candidate_in.dict(exclude_unset=True)
-    
-    # Validation: Only allow "Recruited" if current stage was Final Round
-    if update_data.get("Status") == "Recruited":
-        if db_candidate.Current_Stage != "Final Round" and db_candidate.Status != "Recruited":
-             raise HTTPException(status_code=400, detail="Candidate must complete Final Round before being Recruited.")
-    
-    for key, value in update_data.items():
-        setattr(db_candidate, key, value)
-    
-    try:
-        db.commit()
-        return {"message": "Candidate updated successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Interview Endpoints ---
 
-@router.post("/ScheduleInterview", status_code=status.HTTP_201_CREATED)
-def schedule_interview(interview_in: CandidateSchemas.InterviewCreate, db: Session = Depends(get_db)):
-    try:
-        new_int_id = interview_in.Interview_id or generate_next_interview_id(db)
-        interview_data = interview_in.dict(exclude={"Interview_id"})
-        
-        db_interview = CandidateDB.Interview(
-            Interview_id=new_int_id,
-            **interview_data
+
+@router.get("/interviews/active")
+def get_active_interviews(
+    stage_id: Optional[int] = None,
+    stage_status: Optional[str] = None,
+    interview_status: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    # Fetch all interviews joined with Stage and Candidate
+    all_interviews = (
+        db.query(CandidateDB.Interview)
+        .join(CandidateDB.Stage)
+        .join(CandidateDB.Candidate)
+        .all()
+    )
+
+    # Dictionary to keep only the latest interview per candidate
+    # Latest is defined by the highest Stage_index
+    candidate_latest_map = {}
+
+    for inv in all_interviews:
+        cand = inv.candidate
+        if not cand:
+            continue
+
+        # Filter candidates by status (Applied or Selected)
+        if cand.Candidate_status not in ["Applied", "Selected"]:
+            continue
+
+        cand_id = cand.id
+        stage_index = inv.stage.Stage_index if inv.stage else -1
+
+        if cand_id not in candidate_latest_map:
+            candidate_latest_map[cand_id] = inv
+        else:
+            existing_inv = candidate_latest_map[cand_id]
+            existing_stage_index = (
+                existing_inv.stage.Stage_index if existing_inv.stage else -1
+            )
+            if stage_index > existing_stage_index:
+                candidate_latest_map[cand_id] = inv
+            elif stage_index == existing_stage_index:
+                # If same stage, take the one with higher ID (more recent record)
+                if inv.id > existing_inv.id:
+                    candidate_latest_map[cand_id] = inv
+
+    response = []
+
+    for inv in candidate_latest_map.values():
+        # Apply filters to the latest round
+        if stage_id and inv.stage_id != stage_id:
+            continue
+        if interview_status and inv.Interview_status != interview_status:
+            continue
+
+        # Get stage status for this specific stage
+        cs = (
+            db.query(CandidateDB.CandidateStage)
+            .filter(
+                CandidateDB.CandidateStage.candidate_id == inv.candidate_id,
+                CandidateDB.CandidateStage.stage_id == inv.stage_id,
+            )
+            .first()
         )
-        db.add(db_interview)
-        db.commit()
-        db.refresh(db_interview)
-        return {"message": "Interview scheduled successfully", "Interview_id": new_int_id}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/UpdateInterview/{interview_id}")
-def update_interview(interview_id: str, interview_in: CandidateSchemas.InterviewUpdate, db: Session = Depends(get_db)):
-    db_interview = db.query(CandidateDB.Interview).filter(CandidateDB.Interview.Interview_id == interview_id).first()
-    if not db_interview:
-        raise HTTPException(status_code=404, detail="Interview not found")
-    
-    update_data = interview_in.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_interview, key, value)
-    
-    try:
-        db.commit()
-        return {"message": "Interview updated successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        current_status = cs.Stage_status if cs else "Pending"
 
-@router.post("/BulkSchedule", status_code=status.HTTP_201_CREATED)
-def bulk_schedule_interviews(bulk_in: CandidateSchemas.BulkInterviewCreate, db: Session = Depends(get_db)):
+        if stage_status and current_status != stage_status:
+            continue
+
+        # Get total stages count
+        total_stages = db.query(CandidateDB.Stage).count()
+        
+        # Get completed stages count for this candidate
+        completed_stages = db.query(CandidateDB.CandidateStage).filter(
+            CandidateDB.CandidateStage.candidate_id == inv.candidate_id,
+            CandidateDB.CandidateStage.Stage_status == "Completed"
+        ).count()
+
+        response.append(
+            {
+                "id": inv.id,
+                "candidate_id": inv.candidate_id,
+                "Candidate_id": inv.candidate.Candidate_ID,
+                "candidate_name": inv.candidate.Candidate_name,
+                "candidate_role": inv.candidate.Job_title,
+                "current_candidate_stage": (
+                    inv.stage.Stage_name if inv.stage else "Unknown"
+                ),
+                "Interview_date": inv.Interview_date,
+                "Interview_time": inv.Interview_time,
+                "Interview_status": inv.Interview_status,
+                "Stage_status": current_status,
+                "Stage_name": inv.stage.Stage_name if inv.stage else "",
+                "completed_stages_count": completed_stages,
+                "total_stages_count": total_stages
+            }
+        )
+
+    return response
+
+
+@router.put("/UpdateInterview/{id}")
+def update_interview(
+    id: int,
+    interview_in: CandidateSchemas.InterviewUpdate,
+    db: Session = Depends(get_db),
+):
+    interview = (
+        db.query(CandidateDB.Interview).filter(CandidateDB.Interview.id == id).first()
+    )
+    if not interview:
+        raise HTTPException(404, "Interview not found")
+
+    candidate = interview.candidate
+    current_stage_record = (
+        db.query(CandidateDB.CandidateStage)
+        .filter(
+            CandidateDB.CandidateStage.candidate_id == interview.candidate_id,
+            CandidateDB.CandidateStage.stage_id == interview.stage_id,
+        )
+        .first()
+    )
+
+    # Apply updates
+    if interview_in.Interview_status:
+        interview.Interview_status = interview_in.Interview_status
+
+    # REJECT FLOW
+    if interview_in.Final_decision == "Rejected":
+        candidate.Candidate_status = "Rejected"
+        interview.Interview_status = "Rejected"
+        if current_stage_record:
+            current_stage_record.Stage_status = "Rejected"
+        db.commit()
+        return {"message": "Candidate Rejected"}
+
+    # PROGRESSION FLOW
+    if interview_in.Final_decision == "Selected":
+        interview.Interview_status = "Completed"
+
+        if current_stage_record:
+            current_stage_record.Stage_status = "Completed"
+
+        # Find next stage
+        current_master_stage = interview.stage
+        next_master_stage = (
+            db.query(CandidateDB.Stage)
+            .filter(
+                CandidateDB.Stage.Stage_index == current_master_stage.Stage_index + 1
+            )
+            .first()
+        )
+
+        if next_master_stage:
+            # Move to next
+            candidate.Candidate_status = "Selected"
+
+            # Create next CandidateStage
+            new_cs = CandidateDB.CandidateStage(
+                candidate_id=candidate.id,
+                stage_id=next_master_stage.id,
+                Stage_status="In Progress",
+            )
+            db.add(new_cs)
+
+            # Create next Interview (placeholder)
+            new_inv = CandidateDB.Interview(
+                candidate_id=candidate.id,
+                stage_id=next_master_stage.id,
+                Interview_status="Scheduled",
+            )
+            db.add(new_inv)
+
+            db.commit()
+            return {"message": f"Moved to {next_master_stage.Stage_name}"}
+        else:
+            # No next stage -> Candidate is Recruited
+            candidate.Candidate_status = "Recruited"
+            db.commit()
+            return {"message": "Candidate Recruited (Pipeline Complete)"}
+
+    db.commit()
+    return {"message": "Interview Updated"}
+
+
+@router.get(
+    "/stages/{candidate_id}",
+    response_model=List[CandidateSchemas.CandidateStageResponse],
+)
+def get_candidate_stages(candidate_id: int, db: Session = Depends(get_db)):
+    stages = (
+        db.query(CandidateDB.CandidateStage)
+        .filter(CandidateDB.CandidateStage.candidate_id == candidate_id)
+        .all()
+    )
+    results = []
+    for s in stages:
+        data = CandidateSchemas.CandidateStageResponse.from_orm(s)
+        data.Stage_name = s.stage.Stage_name if s.stage else ""
+        results.append(data)
+    return results
+
+
+@router.post("/BulkSchedule")
+def bulk_schedule_interviews(
+    bulk_in: CandidateSchemas.BulkInterviewCreate, db: Session = Depends(get_db)
+):
     try:
-        success_count = 0
-        for candidate_id in bulk_in.Candidate_ids:
-            # 1. Check if candidate exists
-            db_candidate = db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.Candidate_id == candidate_id).first()
-            if not db_candidate:
+        # Resolve stage name to ID
+        stage_master = (
+            db.query(CandidateDB.Stage)
+            .filter(CandidateDB.Stage.Stage_name == bulk_in.Stage_name)
+            .first()
+        )
+
+        if not stage_master:
+            # Fallback: if stage name doesn't exist, use the first one
+            stage_master = (
+                db.query(CandidateDB.Stage)
+                .order_by(CandidateDB.Stage.Stage_index)
+                .first()
+            )
+
+        count = 0
+        for c_id in bulk_in.Candidate_ids:
+            candidate = (
+                db.query(CandidateDB.Candidate)
+                .filter(CandidateDB.Candidate.id == c_id)
+                .first()
+            )
+            if not candidate:
                 continue
-            
-            # 2. Update Status to "Interview" and update Stage
-            db_candidate.Status = "Interview"
-            # If round type matches our pipeline stages, update it
-            if bulk_in.Interview_status in ["Screening", "HR Round", "Technical Round", "Final Round"]:
-                db_candidate.Current_Stage = bulk_in.Interview_status
-            elif db_candidate.Current_Stage == "Applied":
-                db_candidate.Current_Stage = "Screening"
-            
-            # 3. Create Interview Record
-            new_int_id = generate_next_interview_id(db)
-            db_interview = CandidateDB.Interview(
-                Interview_id=new_int_id,
-                Candidate_id=candidate_id,
+
+            # Update candidate status
+            candidate.Candidate_status = "Selected"
+
+            # Check if stage already exists for candidate
+            existing_cs = (
+                db.query(CandidateDB.CandidateStage)
+                .filter(
+                    CandidateDB.CandidateStage.candidate_id == c_id,
+                    CandidateDB.CandidateStage.stage_id == stage_master.id,
+                )
+                .first()
+            )
+
+            if not existing_cs:
+                new_cs = CandidateDB.CandidateStage(
+                    candidate_id=c_id,
+                    stage_id=stage_master.id,
+                    Stage_status="In Progress",
+                )
+                db.add(new_cs)
+            else:
+                existing_cs.Stage_status = "In Progress"
+
+            # Create Interview record
+            new_inv = CandidateDB.Interview(
+                candidate_id=c_id,
+                stage_id=stage_master.id,
                 Interview_date=bulk_in.Interview_date,
                 Interview_time=bulk_in.Interview_time,
-                Interview_status=bulk_in.Interview_status,
-                Interviewer_name=bulk_in.Interviewer_name,
-                Stage_status=bulk_in.Stage_status
+                Interview_status="Scheduled",
             )
-            db.add(db_interview)
-            success_count += 1
-            
+            db.add(new_inv)
+            count += 1
+
         db.commit()
-        return {"message": f"Successfully scheduled {success_count} interviews", "count": success_count}
+        return {"message": f"Successfully scheduled {count} interviews", "count": count}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
-# --- Stage Endpoints ---
-
-@router.post("/AddStage", status_code=status.HTTP_201_CREATED)
-def add_stage(stage_in: CandidateSchemas.StageCreate, db: Session = Depends(get_db)):
-    try:
-        # Generate Stage_id if not provided (e.g., STG-001)
-        if not stage_in.Stage_id:
-            count = db.query(CandidateDB.Stage_details).count()
-            stage_in.Stage_id = f"STG-{str(count + 1).zfill(3)}"
-            
-        db_stage = CandidateDB.Stage_details(**stage_in.dict())
-        db.add(db_stage)
-        db.commit()
-        db.refresh(db_stage)
-        return db_stage
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/stages/{candidate_id}", response_model=List[CandidateSchemas.Stage])
-def get_candidate_stages(candidate_id: str, db: Session = Depends(get_db)):
-    return db.query(CandidateDB.Stage_details).filter(CandidateDB.Stage_details.Candidate_id == candidate_id).all()
-
-# # --- Resource Fetching (Filters/Dropdowns) ---
-
-@router.get("/resources/sources")
-def get_candidate_sources(db: Session = Depends(get_db)):
-    """Fetch unique candidate sources for filtering."""
-    sources = db.query(CandidateDB.Candidate.Candidate_Source).distinct().all()
-    return [s[0] for s in sources if s[0]]
-
-@router.get("/resources/job-titles")
-def get_job_titles(db: Session = Depends(get_db)):
-    """Fetch unique job titles for filtering."""
-    jobs = db.query(CandidateDB.Candidate.Job_title).distinct().all()
-    return [j[0] for j in jobs if j[0]]

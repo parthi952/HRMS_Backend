@@ -127,7 +127,7 @@ class Attendance(Base):
     __tablename__ = "attendance"
 
     Emp_id        = Column(String, ForeignKey("employees.Emp_id"), primary_key=True, nullable=False)
-    date          = Column(Date, nullable=False)
+    date          = Column(Date, primary_key=True, nullable=False)
     check_in      = Column(String)
     check_out     = Column(String)
     status        = Column(String, nullable=False)
@@ -151,7 +151,8 @@ class LeaveDB(Base):
 class LeaveHistoryDB(Base):
     __tablename__ = "leavehistory"
 
-    Emp_id        = Column(String, ForeignKey("employees.Emp_id"), primary_key=True, nullable=False)
+    id            = Column(Integer, primary_key=True, index=True)
+    Emp_id        = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
     employee_name = Column(String)
     Duration      = Column(String)
     Reason        = Column(String)
