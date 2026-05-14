@@ -88,9 +88,7 @@ class CandidateStage(Base):
     )
 
     stage = relationship("Stage")
-# =========================================================
-# INTERVIEW TABLE
-# =========================================================
+
 
 class Interview(Base):
 
@@ -112,6 +110,8 @@ class Interview(Base):
         String,
         default="Scheduled"
     )
+
+    Interview_ID = Column(String, unique=True)
 
     Interview_date = Column(Date)
 

@@ -73,6 +73,7 @@ class InterviewResponse(BaseModel):
     Interview_status: str
     Interview_date: date
     Interview_time: time
+    Interview_ID: Optional[str] = None
     
     # Optional nested data for UI
     candidate_name: Optional[str] = None

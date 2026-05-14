@@ -6,12 +6,13 @@ from sqlalchemy.orm import Session
 from routers import CustomID, Department, PayRoll, employee, Candidate
 from routers import Attendance as att
 from routers import Leave
-from routers import option
+from routers import option, Requirement
 from contextlib import asynccontextmanager
 
 # Importing your local modules
 import module.EmplyeeDB as EmplyeeDB
 import module.CandidateDB as CandidateDB
+import module.RequirementDB as RequirementDB
 from database import engine, get_db
 
 
@@ -59,3 +60,5 @@ app.include_router(Department.router)
 app.include_router(CustomID.router)
 
 app.include_router(Candidate.router)
+
+app.include_router(Requirement.router)
