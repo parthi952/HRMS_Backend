@@ -1,7 +1,8 @@
 from azure.storage.blob import (
     BlobServiceClient,
     generate_blob_sas,
-    BlobSasPermissions
+    BlobSasPermissions,
+    ContentSettings
 )
 
 from dotenv import load_dotenv
@@ -64,7 +65,7 @@ def generate_file_url(blob_name: str):
     return file_url
 
 
-def upload_file(file, blob_name: str):
+def upload_file(file, blob_name: str, content_type: str = "application/octet-stream"):
     blob_client = blob_service_client.get_blob_client(
         container=container_name,
         blob=blob_name
@@ -76,7 +77,11 @@ def upload_file(file, blob_name: str):
 
     blob_client.upload_blob(
         file,
-        overwrite=True
+        overwrite=True,
+        content_settings=ContentSettings(
+            content_type=content_type,
+            content_disposition="inline"
+        )
     )
 
-    return generate_file_url(blob_name)
+    return generate_file_url(blob_name)

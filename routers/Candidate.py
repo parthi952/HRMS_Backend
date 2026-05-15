@@ -69,7 +69,7 @@ def create_candidate(
 
             resume_blob_name = generate_blob_name(Resume_path.filename)
 
-            upload_file(Resume_path.file, resume_blob_name)
+            upload_file(Resume_path.file, resume_blob_name, Resume_path.content_type)
 
         # 2. Create Candidate
         db_candidate = CandidateDB.Candidate(
@@ -83,7 +83,9 @@ def create_candidate(
         )
         db.add(db_candidate)
         db.flush()  # Get ID
-        print("filename", Resume_path.filename)
+        
+        if Resume_path:
+             print("filename", Resume_path.filename)
         print("name", Candidate_name)
 
         # 3. Find First Stage from Master
@@ -128,6 +130,9 @@ def create_candidate(
 def list_candidates(db: Session = Depends(get_db)):
     candidates = db.query(CandidateDB.Candidate).all()
 
+    for c in candidates:
+        if c.Resume_path:
+            c.Resume_path = generate_file_url(c.Resume_path)
     # Inject dynamic current stage
     results = []
     for c in candidates:
@@ -137,7 +142,7 @@ def list_candidates(db: Session = Depends(get_db)):
 
     return results
 
-
+# Candidate details By id
 @router.get("/{id}", response_model=CandidateSchemas.CandidateResponse)
 def get_candidate(id: int, db: Session = Depends(get_db)):
     candidate = (
@@ -148,6 +153,9 @@ def get_candidate(id: int, db: Session = Depends(get_db)):
 
     data = CandidateSchemas.CandidateResponse.from_orm(candidate)
     data.current_candidate_stage = get_current_stage(db, candidate.id)
+
+    if candidate.Resume_path:
+        candidate.Resume_path = generate_file_url(candidate.Resume_path)
     return data
 
 
