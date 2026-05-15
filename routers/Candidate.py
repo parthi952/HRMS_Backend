@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from database import get_db
 import module.CandidateDB as CandidateDB
 import Schemas.CandidateSchemas as CandidateSchemas
+from FileUpload.BlobFile import generate_file_url, upload_file, generate_blob_name
 
 router = APIRouter(prefix="/candidates", tags=["Candidates"])
 
@@ -47,7 +48,12 @@ def get_all_stages(db: Session = Depends(get_db)):
 
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
 def create_candidate(
-    candidate_in: CandidateSchemas.CandidateCreate, db: Session = Depends(get_db)
+    Candidate_name: str = Form(...),
+    Job_title: str = Form(...),
+    Candidate_Email: str = Form(...),
+    Candidate_Phone: str = Form(...),
+    Resume_path: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
 ):
     try:
         # 1. Generate internal ID code (e.g. CAN-0001)
@@ -55,14 +61,30 @@ def create_candidate(
 
         new_code = generate_next_candidate_id(db)
 
+        resume_blob_name = None
+
+        resume_blob_name = None
+
+        if Resume_path:
+
+            resume_blob_name = generate_blob_name(Resume_path.filename)
+
+            upload_file(Resume_path.file, resume_blob_name)
+
         # 2. Create Candidate
         db_candidate = CandidateDB.Candidate(
             Candidate_ID=new_code,
             Candidate_status="Applied",
-            **candidate_in.dict()
+            Resume_path=resume_blob_name,
+            Candidate_name=Candidate_name,
+            Job_title=Job_title,
+            Candidate_Email=Candidate_Email,
+            Candidate_Phone=Candidate_Phone,
         )
         db.add(db_candidate)
         db.flush()  # Get ID
+        print("filename", Resume_path.filename)
+        print("name", Candidate_name)
 
         # 3. Find First Stage from Master
         first_stage_master = (
@@ -82,11 +104,12 @@ def create_candidate(
 
         # 5. Create first Interview
         from Caluclation.IdCustom import generate_next_interview_id
+
         new_interview = CandidateDB.Interview(
             candidate_id=db_candidate.id,
             stage_id=first_stage_master.id,
             Interview_status="Scheduled",
-            Interview_ID=generate_next_interview_id(db)
+            Interview_ID=generate_next_interview_id(db),
         )
         db.add(new_interview)
 
@@ -223,12 +246,16 @@ def get_active_interviews(
 
         # Get total stages count
         total_stages = db.query(CandidateDB.Stage).count()
-        
+
         # Get completed stages count for this candidate
-        completed_stages = db.query(CandidateDB.CandidateStage).filter(
-            CandidateDB.CandidateStage.candidate_id == inv.candidate_id,
-            CandidateDB.CandidateStage.Stage_status == "Completed"
-        ).count()
+        completed_stages = (
+            db.query(CandidateDB.CandidateStage)
+            .filter(
+                CandidateDB.CandidateStage.candidate_id == inv.candidate_id,
+                CandidateDB.CandidateStage.Stage_status == "Completed",
+            )
+            .count()
+        )
 
         response.append(
             {
@@ -246,7 +273,7 @@ def get_active_interviews(
                 "Stage_status": current_status,
                 "Stage_name": inv.stage.Stage_name if inv.stage else "",
                 "completed_stages_count": completed_stages,
-                "total_stages_count": total_stages
+                "total_stages_count": total_stages,
             }
         )
 
@@ -283,12 +310,12 @@ def update_interview(
     if interview_in.Final_decision == "Rejected":
         candidate.Candidate_status = "Rejected"
         interview.Interview_status = "Rejected"
-        
+
         # Delete all candidate stages for this candidate when rejected
         db.query(CandidateDB.CandidateStage).filter(
             CandidateDB.CandidateStage.candidate_id == interview.candidate_id
         ).delete()
-        
+
         db.commit()
         return {"message": "Candidate Rejected and Stages Cleared"}
 
@@ -323,11 +350,12 @@ def update_interview(
 
             # Create next Interview (placeholder)
             from Caluclation.IdCustom import generate_next_interview_id
+
             new_inv = CandidateDB.Interview(
                 candidate_id=candidate.id,
                 stage_id=next_master_stage.id,
                 Interview_status="Scheduled",
-                Interview_ID=generate_next_interview_id(db)
+                Interview_ID=generate_next_interview_id(db),
             )
             db.add(new_inv)
 
@@ -336,27 +364,29 @@ def update_interview(
         else:
             # No next stage -> Candidate is Recruited
             candidate.Candidate_status = "Recruited"
-            
+
             # --- AUTO CREATE REQUIREMENT ---
             import module.RequirementDB as RequirementDB
-            
+
             # Check if requirement already exists for this candidate
-            existing_req = db.query(RequirementDB.Requirement).filter(
-                RequirementDB.Requirement.Temp_Id == candidate.Candidate_ID
-            ).first()
-            
+            existing_req = (
+                db.query(RequirementDB.Requirement)
+                .filter(RequirementDB.Requirement.Temp_Id == candidate.Candidate_ID)
+                .first()
+            )
+
             if not existing_req:
                 new_req = RequirementDB.Requirement(
                     Temp_Id=candidate.Candidate_ID,
                     name=candidate.Candidate_name,
                     email=candidate.Candidate_Email,
-                    department="General", # Default department
+                    department="General",  # Default department
                     position=candidate.Job_title,
-                    Resume=candidate.Resume_path
+                    Resume=candidate.Resume_path,
                 )
                 db.add(new_req)
             # -------------------------------
-            
+
             db.commit()
             return {"message": "Candidate Recruited and Onboarding Initiated"}
 
@@ -437,13 +467,14 @@ def bulk_schedule_interviews(
 
             # Create Interview record
             from Caluclation.IdCustom import generate_next_interview_id
+
             new_inv = CandidateDB.Interview(
                 candidate_id=c_id,
                 stage_id=stage_master.id,
                 Interview_date=bulk_in.Interview_date,
                 Interview_time=bulk_in.Interview_time,
                 Interview_status="Scheduled",
-                Interview_ID=generate_next_interview_id(db)
+                Interview_ID=generate_next_interview_id(db),
             )
             db.add(new_inv)
             count += 1
