@@ -12,3 +12,9 @@ google-auth-oauthlib
 azure-storage-blob
 uuid
 python-multipart
+pdfplumber
+opencv-python
+easyocr
+spacy
+sentence_transformers
+google-genai

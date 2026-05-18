@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2 import Date
 from sqlalchemy.orm import Session
-from routers import CustomID, Department, PayRoll, employee, Candidate
+from routers import CustomID, Department, PayRoll, employee, Candidate, JobPost
 from routers import Attendance as att
 from routers import Leave
 from routers import option, Requirement
@@ -62,3 +62,5 @@ app.include_router(CustomID.router)
 app.include_router(Candidate.router)
 
 app.include_router(Requirement.router)
+
+app.include_router(JobPost.router)
