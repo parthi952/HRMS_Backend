@@ -38,6 +38,9 @@ class CandidateResponse(CandidateBase):
     Candidate_ID: str # Alphanumeric code
     Candidate_status: str
     current_candidate_stage: Optional[str] = None # Calculated dynamically in router
+    completed_stages_count: Optional[int] = None
+    total_stages_count: Optional[int] = None
+    stages_list: Optional[List[dict]] = None
 
 class CandidateUpdate(BaseModel):
     Candidate_name: Optional[str] = None
@@ -63,6 +66,8 @@ class InterviewUpdate(BaseModel):
     Interview_feedback: Optional[str] = None
     Final_decision: Optional[str] = None
     Rejection_reason: Optional[str] = None
+    Interview_date: Optional[date] = None
+    Interview_time: Optional[time] = None
 
 class InterviewResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

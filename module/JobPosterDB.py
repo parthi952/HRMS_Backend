@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Date, ForeignKey
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -8,6 +8,7 @@ class JobPostDetailes(Base):
     PostId = Column(String, unique=True)
     title = Column(String)
     department = Column(String)
+    location = Column(String)
     stack = Column(String)
     salary = Column(String)
     experience = Column(String)
@@ -16,6 +17,11 @@ class JobPostDetailes(Base):
     perks = Column(String)
     Description = Column(String)
     applyLink = Column(String)
+
+    # Job lifecycle fields
+    expire_date    = Column(Date, nullable=True)     # auto-disables when this date is crossed
+    interview_date = Column(Date, nullable=True)     # scheduled interview date
+    is_active      = Column(Boolean, default=True)   # manually toggle or auto-set by expire_date
 
     ats_keyskills = relationship("ATS_KeySkills", back_populates="job_post")
     ai_job_post = relationship("AiJobPost", back_populates="job_post")
@@ -29,6 +35,13 @@ class ATS_KeySkills(Base):
     Education = Column(String)
     Experience = Column(String)
     Abilities = Column(String)
+    
+    # Custom category weights for HR
+    Weight_Tech = Column(Integer, default=30)
+    Weight_Abilities = Column(Integer, default=20)
+    Weight_Experience = Column(Integer, default=20)
+    Weight_Education = Column(Integer, default=15)
+    Weight_Soft = Column(Integer, default=15)
     
     job_post = relationship("JobPostDetailes", back_populates="ats_keyskills")
 

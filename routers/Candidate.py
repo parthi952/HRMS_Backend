@@ -43,6 +43,28 @@ def get_all_stages(db: Session = Depends(get_db)):
     return db.query(CandidateDB.Stage).order_by(CandidateDB.Stage.Stage_index).all()
 
 
+@router.delete("/stages/master/{stage_id}", status_code=status.HTTP_200_OK)
+def delete_stage(stage_id: int, db: Session = Depends(get_db)):
+    db_stage = db.query(CandidateDB.Stage).filter(CandidateDB.Stage.id == stage_id).first()
+    if not db_stage:
+        raise HTTPException(404, "Stage not found")
+    db.delete(db_stage)
+    db.commit()
+    return {"message": "Stage deleted successfully"}
+
+
+@router.put("/stages/master/{stage_id}", response_model=CandidateSchemas.StageResponse)
+def update_stage(stage_id: int, stage_in: CandidateSchemas.StageBase, db: Session = Depends(get_db)):
+    db_stage = db.query(CandidateDB.Stage).filter(CandidateDB.Stage.id == stage_id).first()
+    if not db_stage:
+        raise HTTPException(404, "Stage not found")
+    db_stage.Stage_name = stage_in.Stage_name
+    db_stage.Stage_index = stage_in.Stage_index
+    db.commit()
+    db.refresh(db_stage)
+    return db_stage
+
+
 # --- Candidate CRUD ---
 
 
@@ -129,18 +151,30 @@ def create_candidate(
 @router.get("/all", response_model=List[CandidateSchemas.CandidateResponse])
 def list_candidates(db: Session = Depends(get_db)):
     candidates = db.query(CandidateDB.Candidate).all()
+    total_stages = db.query(CandidateDB.Stage).count()
 
+    results = []
     for c in candidates:
         if c.Resume_path:
             c.Resume_path = generate_file_url(c.Resume_path)
-    # Inject dynamic current stage
-    results = []
-    for c in candidates:
+            
+        completed_stages = (
+            db.query(CandidateDB.CandidateStage)
+            .filter(
+                CandidateDB.CandidateStage.candidate_id == c.id,
+                CandidateDB.CandidateStage.Stage_status == "Completed",
+            )
+            .count()
+        )
+        
         data = CandidateSchemas.CandidateResponse.from_orm(c)
         data.current_candidate_stage = get_current_stage(db, c.id)
+        data.completed_stages_count = completed_stages
+        data.total_stages_count = total_stages
         results.append(data)
 
     return results
+
 
 # Candidate details By id
 @router.get("/{id}", response_model=CandidateSchemas.CandidateResponse)
@@ -151,8 +185,53 @@ def get_candidate(id: int, db: Session = Depends(get_db)):
     if not candidate:
         raise HTTPException(404, "Candidate not found")
 
+    total_stages = db.query(CandidateDB.Stage).count()
+    completed_stages = (
+        db.query(CandidateDB.CandidateStage)
+        .filter(
+            db.query(CandidateDB.CandidateStage).filter(
+                CandidateDB.CandidateStage.candidate_id == candidate.id,
+                CandidateDB.CandidateStage.Stage_status == "Completed"
+            ).exists()
+        )
+        .count()
+    )
+
+    # Calculate actual completed stages
+    completed_stages = (
+        db.query(CandidateDB.CandidateStage)
+        .filter(
+            CandidateDB.CandidateStage.candidate_id == candidate.id,
+            CandidateDB.CandidateStage.Stage_status == "Completed"
+        )
+        .count()
+    )
+
+    # Get stages list with statuses
+    all_stages = db.query(CandidateDB.Stage).order_by(CandidateDB.Stage.Stage_index).all()
+    stages_list = []
+    for s in all_stages:
+        cs_record = (
+            db.query(CandidateDB.CandidateStage)
+            .filter(
+                CandidateDB.CandidateStage.candidate_id == candidate.id,
+                CandidateDB.CandidateStage.stage_id == s.id,
+            )
+            .first()
+        )
+        status_str = cs_record.Stage_status if cs_record else "Pending"
+        stages_list.append({
+            "stage_id": s.id,
+            "Stage_name": s.Stage_name,
+            "Stage_index": s.Stage_index,
+            "Stage_status": status_str
+        })
+
     data = CandidateSchemas.CandidateResponse.from_orm(candidate)
     data.current_candidate_stage = get_current_stage(db, candidate.id)
+    data.completed_stages_count = completed_stages
+    data.total_stages_count = total_stages
+    data.stages_list = stages_list
 
     if candidate.Resume_path:
         candidate.Resume_path = generate_file_url(candidate.Resume_path)
@@ -313,6 +392,10 @@ def update_interview(
     # Apply updates
     if interview_in.Interview_status:
         interview.Interview_status = interview_in.Interview_status
+    if interview_in.Interview_date is not None:
+        interview.Interview_date = interview_in.Interview_date
+    if interview_in.Interview_time is not None:
+        interview.Interview_time = interview_in.Interview_time
 
     # REJECT FLOW
     if interview_in.Final_decision == "Rejected":

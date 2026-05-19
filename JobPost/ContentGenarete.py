@@ -31,9 +31,7 @@ def generate_job_post_content(request_data: AiGenerationRequestSchema) -> dict:
     if tone_override:
         tone = tone_override
     else:
-        tone_desc = ICON_TONE_MAP.get(icon_type, ICON_TONE_MAP["Bot"])
-        tone_name = ICON_NAME_MAP.get(icon_type, ICON_NAME_MAP["Bot"])
-        tone = f"{tone_name} ({tone_desc})"
+        tone = "Balanced Assistant (You are an expert HR recruiter and ATS specialist.)"
     
     # Fallback override if custom tone prompt is explicitly provided
     if request_data.AIMode and len(request_data.AIMode) > 0:
@@ -67,13 +65,17 @@ Create an attractive LinkedIn hiring post:
 {checklist_str}
 
 SECTION 2:
-Generate ATS JSON data with:
-- technical_skills
-- soft_skills
-- education
-- experience
-- important_abilities
-- keywords
+Extract ATS keyword categories from the job description above.
+Each category must be a flat list of individual keyword strings (no sentences).
+Be thorough and specific.
+
+Categories:
+- technical_skills: All technical tools, languages, frameworks, platforms (e.g. "ReactJS", "Python", "FastAPI", "MongoDB")
+- soft_skills: Interpersonal and behavioral traits (e.g. "communication", "teamwork", "problem-solving")
+- education: List of accepted education qualifications as short keywords (e.g. "computer science", "bachelor", "b.tech", "mca")
+- experience: List of experience-related keywords/phrases (e.g. "2 years", "3+ years", "senior level", "internship")
+- abilities: Specific role abilities and competencies required (e.g. "REST API design", "agile methodology", "code review", "CI/CD", "unit testing")
+- keywords: Other important domain keywords from the job description not covered above
 
 Return format:
 
@@ -85,9 +87,9 @@ ATS_JSON:
 {{
    "technical_skills": [],
    "soft_skills": [],
-   "education": "",
-   "experience": "",
-   "important_abilities": [],
+   "education": [],
+   "experience": [],
+   "abilities": [],
    "keywords": []
 }}
 ```

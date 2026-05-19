@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import uuid
+from datetime import date as today_date
 
 from database import get_db
 from module.JobPosterDB import JobPostDetailes, ATS_KeySkills, AiJobPost, education_Options, AI_Model, AIMode, SelectionCheckList
@@ -14,6 +15,30 @@ router = APIRouter(
     prefix="/jobpost",
     tags=["Job Post"]
 )
+
+# Automated startup migrations for new columns
+try:
+    from database import engine
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        for col in [
+            "ALTER TABLE jobpost_detailes ADD COLUMN location VARCHAR;",
+            "ALTER TABLE jobpost_detailes ADD COLUMN expire_date DATE;",
+            "ALTER TABLE jobpost_detailes ADD COLUMN interview_date DATE;",
+            "ALTER TABLE jobpost_detailes ADD COLUMN is_active BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE ats_keyskills ADD COLUMN Weight_Tech INTEGER DEFAULT 30;",
+            "ALTER TABLE ats_keyskills ADD COLUMN Weight_Abilities INTEGER DEFAULT 20;",
+            "ALTER TABLE ats_keyskills ADD COLUMN Weight_Experience INTEGER DEFAULT 20;",
+            "ALTER TABLE ats_keyskills ADD COLUMN Weight_Education INTEGER DEFAULT 15;",
+            "ALTER TABLE ats_keyskills ADD COLUMN Weight_Soft INTEGER DEFAULT 15;",
+        ]:
+            try:
+                conn.execute(text(col))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+except Exception:
+    pass
 
 # === AI GENERATION ENDPOINT ===
 @router.post("/generate", status_code=status.HTTP_200_OK)
@@ -65,8 +90,31 @@ def generate_job_post(request: AiGenerationRequestSchema, db: Session = Depends(
 @router.post("/details/create", status_code=status.HTTP_201_CREATED)
 def create_job_post_details(request: PostingSchema_create, db: Session = Depends(get_db)):
     try:
-        new_post = JobPostDetailes(id=str(uuid.uuid4()), **request.model_dump())
+        # Extract Weight values for ATS_KeySkills to avoid database mismatches
+        req_data = request.model_dump()
+        weight_keys = ["Weight_Tech", "Weight_Abilities", "Weight_Experience", "Weight_Education", "Weight_Soft"]
+        weight_values = {k: req_data.pop(k, None) for k in weight_keys}
+
+        new_post = JobPostDetailes(id=str(uuid.uuid4()), **req_data)
         db.add(new_post)
+        db.flush()
+
+        # Create corresponding ATS KeySkills entry
+        new_ats = ATS_KeySkills(
+            id=str(uuid.uuid4()),
+            PostId=new_post.PostId,
+            Title=new_post.title,
+            Skills=new_post.stack or "",
+            Education=new_post.education or "",
+            Experience=new_post.experience or "",
+            Abilities=new_post.methods or "",
+            Weight_Tech=weight_values.get("Weight_Tech") if weight_values.get("Weight_Tech") is not None else 30,
+            Weight_Abilities=weight_values.get("Weight_Abilities") if weight_values.get("Weight_Abilities") is not None else 20,
+            Weight_Experience=weight_values.get("Weight_Experience") if weight_values.get("Weight_Experience") is not None else 20,
+            Weight_Education=weight_values.get("Weight_Education") if weight_values.get("Weight_Education") is not None else 15,
+            Weight_Soft=weight_values.get("Weight_Soft") if weight_values.get("Weight_Soft") is not None else 15,
+        )
+        db.add(new_ats)
         db.commit()
         db.refresh(new_post)
         return {"message": "Job Post created successfully", "data": new_post}
@@ -77,6 +125,15 @@ def create_job_post_details(request: PostingSchema_create, db: Session = Depends
 @router.get("/details/all", status_code=status.HTTP_200_OK)
 def get_job_posts(db: Session = Depends(get_db)):
     items = db.query(JobPostDetailes).all()
+    today = today_date.today()
+    changed = False
+    for item in items:
+        # Auto-expire: if expire_date is set and passed, deactivate
+        if item.expire_date and item.expire_date < today and item.is_active:
+            item.is_active = False
+            changed = True
+    if changed:
+        db.commit()
     return {"message": "Job Posts fetched successfully", "data": items}
 
 @router.put("/details/{post_id}", status_code=status.HTTP_200_OK)
@@ -86,10 +143,13 @@ def update_job_post_details(post_id: str, request: PostingSchema_create, db: Ses
         if not post:
             raise HTTPException(status_code=404, detail="Job Post not found")
         
-        # Update fields
         for key, value in request.model_dump().items():
             setattr(post, key, value)
-            
+
+        # Re-evaluate is_active based on new expire_date
+        if post.expire_date and post.expire_date < today_date.today():
+            post.is_active = False
+
         db.commit()
         db.refresh(post)
         return {"message": "Job Post updated successfully", "data": post}
@@ -98,6 +158,17 @@ def update_job_post_details(post_id: str, request: PostingSchema_create, db: Ses
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.patch("/details/{post_id}/toggle", status_code=status.HTTP_200_OK)
+def toggle_job_post_active(post_id: str, db: Session = Depends(get_db)):
+    """Manually toggle is_active for a job post."""
+    post = db.query(JobPostDetailes).filter(JobPostDetailes.PostId == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Job Post not found")
+    post.is_active = not post.is_active
+    db.commit()
+    db.refresh(post)
+    return {"message": f"Job Post is now {'active' if post.is_active else 'inactive'}", "is_active": post.is_active}
 
 
 
@@ -118,6 +189,29 @@ def create_ats_keyskills(request: ATS_PostSchema, db: Session = Depends(get_db))
 def get_ats_keyskills(db: Session = Depends(get_db)):
     items = db.query(ATS_KeySkills).all()
     return {"message": "ATS KeySkills fetched successfully", "data": items}
+
+@router.put("/ats_keyskills/{post_id}", status_code=status.HTTP_200_OK)
+def update_ats_keyskills(post_id: str, request: ATS_PostSchema, db: Session = Depends(get_db)):
+    try:
+        item = db.query(ATS_KeySkills).filter(ATS_KeySkills.PostId == post_id).first()
+        if not item:
+            # Create a new one if it doesn't exist
+            new_item = ATS_KeySkills(id=str(uuid.uuid4()), **request.model_dump())
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+            return {"message": "ATS KeySkills created successfully", "data": new_item}
+        
+        for key, value in request.model_dump().items():
+            if key != "id" and key != "PostId":
+                setattr(item, key, value)
+        
+        db.commit()
+        db.refresh(item)
+        return {"message": "ATS KeySkills updated successfully", "data": item}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # === CRUD FOR AiJobPost ===

@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2 import Date
 from sqlalchemy.orm import Session
-from routers import CustomID, Department, PayRoll, employee, Candidate, JobPost
+from routers import CustomID, Department, PayRoll, employee, Candidate, JobPost, ATS_Score
 from routers import Attendance as att
 from routers import Leave
 from routers import option, Requirement
@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 import module.EmplyeeDB as EmplyeeDB
 import module.CandidateDB as CandidateDB
 import module.RequirementDB as RequirementDB
+import module.ATSScoreDB as ATSScoreDB
 from database import engine, get_db
 
 
@@ -20,8 +21,10 @@ from database import engine, get_db
 async def lifespan(app: FastAPI):
     # This automatically creates the tables in PostgreSQL/MySQL on startup
     EmplyeeDB.Base.metadata.create_all(bind=engine)
+    ATSScoreDB.Base.metadata.create_all(bind=engine)
     yield
     print("Shutting down...")
+
 
 
 app = FastAPI(lifespan=lifespan)
@@ -64,3 +67,5 @@ app.include_router(Candidate.router)
 app.include_router(Requirement.router)
 
 app.include_router(JobPost.router)
+
+app.include_router(ATS_Score.router)
