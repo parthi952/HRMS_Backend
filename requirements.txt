@@ -18,3 +18,8 @@ easyocr
 spacy
 sentence_transformers
 google-genai
+python-jose
+passlib 
+bcrypt
+python-dotenv
+weasyprint

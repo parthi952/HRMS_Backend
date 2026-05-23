@@ -250,9 +250,9 @@ class LeaveHistory(BaseModel):
     employee_name: str
     Duration: str
     Reason: str
-    Days: int
-    applayDate: str
-    from_date: str
-    to_date: str
-    status: str
+    Days: Optional[int] = 0
+    applayDate: Optional[str] = ""
+    from_date: Optional[str] = ""
+    to_date: Optional[str] = ""
+    status: Optional[str] = "Pending"
     leave_type: str

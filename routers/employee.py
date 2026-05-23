@@ -1,4 +1,4 @@
-﻿from typing import List
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -220,10 +220,6 @@ def get_employee_education(emp_id: str, db: Session = Depends(get_db)):
     education = (
         db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).all()
     )
-    if not education:
-        raise HTTPException(
-            status_code=404, detail="Education details not found for this employee"
-        )
     return education
 
 
@@ -308,10 +304,6 @@ def get_employee_Familys(emp_id: str, db: Session = Depends(get_db)):
     Familys = (
         db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).all()
     )
-    if not Familys:
-        raise HTTPException(
-            status_code=404, detail="Family details not found for this employee"
-        )
     return Familys
 
 
@@ -420,8 +412,6 @@ def get_employee_work_exp(emp_id: str, db: Session = Depends(get_db)):
         .filter(EmplyeeDB.WorkExpriance.emp_id == emp_id)
         .all()
     )
-    if not work:
-        raise HTTPException(status_code=404, detail="Work experience details not found")
     return work
 
 

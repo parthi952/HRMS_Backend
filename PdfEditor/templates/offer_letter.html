@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Offer of Employment</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&display=swap');
+        
+        body {
+            font-family: 'Outfit', sans-serif;
+            color: #1e293b;
+            line-height: 1.6;
+            padding: 0;
+            margin: 0;
+        }
+        .header-logo {
+            border-bottom: 2px solid #4f46e5;
+            padding-bottom: 20px;
+            margin-bottom: 40px;
+        }
+        .company-name {
+            font-size: 26px;
+            font-weight: 900;
+            color: #4f46e5;
+            text-transform: uppercase;
+            margin: 0;
+            letter-spacing: -0.5px;
+        }
+        .company-slogan {
+            font-size: 9px;
+            font-weight: bold;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-top: 3px;
+        }
+        .date {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 25px;
+            font-weight: bold;
+        }
+        .salutation {
+            font-size: 15px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        p {
+            font-size: 13px;
+            color: #334155;
+            margin-bottom: 18px;
+            text-align: justify;
+        }
+        .details-box {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 20px 25px;
+            margin: 25px 0;
+        }
+        .details-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 13px;
+        }
+        .details-row:last-child {
+            border-bottom: none;
+        }
+        .details-label {
+            font-weight: bold;
+            color: #64748b;
+        }
+        .details-value {
+            font-weight: 600;
+            color: #0f172a;
+        }
+        .signature-section {
+            margin-top: 50px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .sig-block {
+            width: 200px;
+        }
+        .sig-line {
+            border-top: 1px solid #cbd5e1;
+            margin-top: 40px;
+            padding-top: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #4f46e5;
+        }
+        .sig-title {
+            font-size: 10px;
+            color: #64748b;
+            font-weight: bold;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-logo">
+        <h1 class="company-name">Apex Solutions</h1>
+        <div class="company-slogan">Innovating Workforce Management</div>
+    </div>
+
+    <div class="date">{{today_str}}</div>
+
+    <div class="salutation">Dear {{candidate_name}},</div>
+
+    <p>
+        Following our recent discussions and interview process, we are absolutely delighted to offer you employment with Apex Solutions in the capacity of <strong>{{designation}}</strong>. We were incredibly impressed by your skills and experience and believe you will make an exceptional addition to our engineering family.
+    </p>
+
+    <p>
+        If you choose to accept this offer, your employment will be governed by the following core terms:
+    </p>
+
+    <div class="details-box">
+        <div class="details-row">
+            <span class="details-label">Designation</span>
+            <span class="details-value">{{designation}}</span>
+        </div>
+        <div class="details-row">
+            <span class="details-label">Annual Salary (CTC)</span>
+            <span class="details-value">{{salary}} per annum</span>
+        </div>
+        <div class="details-row">
+            <span class="details-label">Date of Joining</span>
+            <span class="details-value">{{joining_date}}</span>
+        </div>
+        <div class="details-row">
+            <span class="details-label">Employment Type</span>
+            <span class="details-value">Full-Time / Permanent</span>
+        </div>
+    </div>
+
+    <p>
+        Please review these details. To accept this offer, please sign and return a duplicate copy of this letter on or before your joining date.
+    </p>
+
+    <p>
+        We look forward to welcoming you to the Apex Solutions team and shaping the future of global enterprise systems together.
+    </p>
+
+    <p>Sincerely,</p>
+
+    <div class="signature-section">
+        <div class="sig-block">
+            <div class="sig-line">Human Resources Manager</div>
+            <div class="sig-title">Apex Solutions HR Department</div>
+        </div>
+        <div class="sig-block">
+            <div class="sig-line">Candidate Signature</div>
+            <div class="sig-title">Date: __________________</div>
+        </div>
+    </div>
+</body>
+</html>

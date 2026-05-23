@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
@@ -94,15 +94,49 @@ def apply_leave(leave_his: employeeSceema.LeaveHistory, db: Session = Depends(ge
     return {"message": "Leave applied", "applayDate": today_date, "days": days_count}
 
 
-# UPDATE STATUS (Approval Logic)
+# UPDATE STATUS (Approval Logic with Role Hierarchy)
+
+from Auth.router import get_current_user
+from Auth.models import User
 
 @router.put("/update-status/{leave_id}")
-def update_status(leave_id: int, status: str, db: Session = Depends(get_db)):
+def update_status(
+    leave_id: int,
+    status: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     leave = db.query(EmplyeeDB.LeaveHistoryDB).filter(EmplyeeDB.LeaveHistoryDB.id == leave_id).first()
-    if not leave or leave.status == "Approved":
-        raise HTTPException(status_code=400, detail="Invalid request or already approved")
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
 
-    if status == "Approved":
+    if leave.status == "Approved":
+        raise HTTPException(status_code=400, detail="Leave already approved and closed")
+
+    role = (current_user.role or "employee").lower()
+
+    if role in ["manager", "tl", "team_lead", "teamlead", "lead"]:
+        # Managers and TLs can recommend or reject, but not approve
+        if status not in ["Recommended", "Rejected"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Managers and Team Leads can only recommend or reject leaves. Final approval is restricted to HR."
+            )
+    elif role in ["hr", "admin"]:
+        # HR/Admin can approve or reject
+        if status not in ["Approved", "Rejected"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid status selection for HR."
+            )
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permissions to modify leave status."
+        )
+
+    # Master balances are only updated on final HR approval
+    if status == "Approved" and role in ["hr", "admin"]:
         master = db.query(EmplyeeDB.LeaveDB).filter(EmplyeeDB.LeaveDB.Emp_id == leave.Emp_id).first()
         if not master:
             master = EmplyeeDB.LeaveDB(Emp_id=leave.Emp_id, employee_name=leave.employee_name, Total_Leave=36, Used=0, Available=36)
@@ -113,7 +147,7 @@ def update_status(leave_id: int, status: str, db: Session = Depends(get_db)):
 
     leave.status = status
     db.commit()
-    return {"message": f"Leave {status}"}
+    return {"message": f"Leave status updated to {status}"}
 
 
 
@@ -144,12 +178,72 @@ def get_employee_leave_details(emp_id: str, db: Session = Depends(get_db)):
         "available_leaves": available,
         "leave_history": [
             {
+                "id": h.id,
                 "applayDate": h.applayDate,
                 "from_date": h.from_date,
                 "to_date": h.to_date,
                 "Days": h.Days,
                 "status": h.status,
-                "Reason": h.Reason
+                "Reason": h.Reason,
+                "leave_type": h.leave_type
             } for h in history
         ]
     }
+
+
+# ==============================
+# ✅ ADMIN: GET ALL LEAVE REQUESTS
+# ==============================
+@router.get("/all-requests")
+def get_all_leave_requests(db: Session = Depends(get_db)):
+    requests = db.query(EmplyeeDB.LeaveHistoryDB).order_by(EmplyeeDB.LeaveHistoryDB.id.desc()).all()
+    return [
+        {
+            "id": r.id,
+            "Emp_id": r.Emp_id,
+            "employee_name": r.employee_name,
+            "Duration": r.Duration,
+            "Reason": r.Reason,
+            "from_date": r.from_date,
+            "to_date": r.to_date,
+            "Days": r.Days,
+            "applayDate": r.applayDate,
+            "leave_type": r.leave_type,
+            "status": r.status
+        } for r in requests
+    ]
+
+
+# ==============================
+# ✅ ADMIN: UPDATE STATUS DIRECTLY (Admin Port)
+# ==============================
+@router.put("/update-status-admin/{leave_id}")
+def update_status_admin(
+    leave_id: int,
+    status: str,
+    db: Session = Depends(get_db)
+):
+    leave = db.query(EmplyeeDB.LeaveHistoryDB).filter(EmplyeeDB.LeaveHistoryDB.id == leave_id).first()
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+
+    if leave.status == "Approved":
+        raise HTTPException(status_code=400, detail="Leave already approved and closed")
+
+    if status not in ["Approved", "Rejected", "Recommended", "Pending"]:
+        raise HTTPException(status_code=400, detail="Invalid status value")
+
+    # If approved, update the master balance
+    if status == "Approved":
+        master = db.query(EmplyeeDB.LeaveDB).filter(EmplyeeDB.LeaveDB.Emp_id == leave.Emp_id).first()
+        if not master:
+            master = EmplyeeDB.LeaveDB(Emp_id=leave.Emp_id, employee_name=leave.employee_name, Total_Leave=36, Used=0, Available=36)
+            db.add(master)
+        
+        master.Used += leave.Days
+        master.Available -= leave.Days
+
+    leave.status = status
+    db.commit()
+    return {"message": f"Leave status updated to {status}"}
+
