@@ -3,9 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2 import Date
 from sqlalchemy.orm import Session
-from routers import (
-    CustomID,
-    Department,
+from routers import (CustomID,Department,
     PayRoll,
     employee,
     Candidate,
@@ -21,6 +19,8 @@ from EmployeePort.Atteddance.Attendance import router as employee_attendance_rou
 from EmployeePort.ActiveBatch import router as active_batch_router
 from routers.PdfRouter import router as pdf_router
 from DailyTaskReport.Routere import router as daily_tasks_router
+from UserPassword import PortAccsesRoute as PortAccses
+
 
 
 # Importing your local modules
@@ -61,6 +61,10 @@ def read_root():
     return {"message": "Employee API is active"}
 
 
+
+app.include_router(Auth.router)
+
+
 # emmployee router
 app.include_router(employee.router)
 
@@ -88,5 +92,8 @@ app.include_router(JobPost.router)
 
 app.include_router(ATS_Score.router)
 
-app.include_router(Auth.router)
+
 app.include_router(daily_tasks_router)
+
+app.include_router(PortAccses.router, prefix="/PortAccses")
+app.include_router(PortAccses.router, prefix="/Auth")

@@ -32,33 +32,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     return user
 
 
-# ✅ REGISTER ENDPOINT
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    # Check if user already exists
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    
-    # Hash password
-    hashed_pwd = hash_password(user_data.password)
-    
-    # Create new user
-    new_user = User(
-        email=user_data.email,
-        password=hashed_pwd,
-        role=user_data.role,
-        emp_id=user_data.emp_id
-    )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
-
 
 # ✅ LOGIN ENDPOINT (POST)
 @router.post("/login", response_model=Token)
@@ -124,43 +97,4 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
-
-# ✅ GET ALL EMPLOYEES PORTAL STATUS
-@router.get("/employee-portal-status")
-def get_employee_portal_status(db: Session = Depends(get_db)):
-    from module.EmplyeeDB import Employee
-    employees = db.query(Employee).all()
-    users = db.query(User).all()
-    
-    # Map emp_id to User record
-    user_map = {u.emp_id: u for u in users if u.emp_id}
-    
-    result = []
-    for emp in employees:
-        has_access = emp.Emp_id in user_map
-        result.append({
-            "Emp_id": emp.Emp_id,
-            "name": emp.name,
-            "email": emp.email,
-            "Department": emp.Department,
-            "designation": emp.designation,
-            "has_portal_access": has_access,
-            "portal_email": user_map[emp.Emp_id].email if has_access else None,
-            "portal_role": user_map[emp.Emp_id].role if has_access else None
-        })
-    return result
-
-
-# ✅ REVOKE USER PORTAL ACCESS
-@router.delete("/revoke/{emp_id}")
-def revoke_portal_access(emp_id: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.emp_id == emp_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Portal access not found for this employee"
-        )
-    db.delete(user)
-    db.commit()
-    return {"message": "Successfully revoked portal access"}
 
