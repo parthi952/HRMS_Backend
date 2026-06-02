@@ -12,6 +12,7 @@ cols_to_add = [
     ("ats_keyskills", "Weight_Experience", "INTEGER DEFAULT 20"),
     ("ats_keyskills", "Weight_Education", "INTEGER DEFAULT 15"),
     ("ats_keyskills", "Weight_Soft", "INTEGER DEFAULT 15"),
+    ("departments", "Dep_id", "VARCHAR"),
 ]
 
 with engine.connect() as conn:

@@ -69,7 +69,7 @@ def generate_next_dep_id(db: Session):
         category="DEP",
         id_column=DepartmentDB.Department.Dep_id,
         default_prefix="DEP",
-        default_separator="/",
+        default_separator="-",
         default_digit=3
     )
 

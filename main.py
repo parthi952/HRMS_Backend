@@ -20,6 +20,8 @@ from EmployeePort.ActiveBatch import router as active_batch_router
 from routers.PdfRouter import router as pdf_router
 from DailyTaskReport.Routere import router as daily_tasks_router
 from UserPassword import PortAccsesRoute as PortAccses
+# pyrefly: ignore [missing-import]
+from ManagerPort.M_Leave import router as ManagerPort_Leave
 
 
 
@@ -42,7 +44,7 @@ async def lifespan(app: FastAPI):
     print("Shutting down...")
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan,root_path="/api")
 
 # CORS setup so your frontend can talk to this API
 app.add_middleware(
@@ -97,3 +99,4 @@ app.include_router(daily_tasks_router)
 
 app.include_router(PortAccses.router, prefix="/PortAccses")
 app.include_router(PortAccses.router, prefix="/Auth")
+app.include_router(ManagerPort_Leave)

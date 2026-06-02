@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
@@ -27,24 +27,19 @@ router = APIRouter(
 # =====================================================
 @router.get("/", response_model=List[DepartmentResponse])
 def get_departments(db: Session = Depends(get_db)):
+    departments = db.query(DepartmentDB.Department).all()
+    all_employees = db.query(Employee).all()
+    
+    # Compute counts in memory to avoid PostgreSQL GroupingError 
+    # when the primary key constraint is not officially recognized in the database schema.
+    counts = {}
+    for emp in all_employees:
+        dept_name = (emp.Department or "").strip().lower()
+        counts[dept_name] = counts.get(dept_name, 0) + 1
 
-    results = (
-        db.query(
-            DepartmentDB.Department,
-            func.count(Employee.Emp_id).label("total_count")
-        )
-        .outerjoin(
-            Employee,
-            func.trim(DepartmentDB.Department.Dep_name) == func.trim(Employee.Department)
-        )
-        .group_by(DepartmentDB.Department.Dep_id)
-        .all()
-    )
-
-    departments = []
-    for dept, total_count in results:
-        dept.Total_employees = total_count
-        departments.append(dept)
+    for dept in departments:
+        dept_name = (dept.Dep_name or "").strip().lower()
+        dept.Total_employees = counts.get(dept_name, 0)
 
     return departments
 
@@ -53,7 +48,7 @@ def get_departments(db: Session = Depends(get_db)):
 # GET EMPLOYEES IN A DEPARTMENT
 # GET /departments/{dep_name}/employees
 # =====================================================
-@router.get("/{dep_id}/employees", response_model=List[DepartmentEmployeeItem])
+@router.get("/{dep_id:path}/employees", response_model=List[DepartmentEmployeeItem])
 def get_employees_by_department(dep_id: str, db: Session = Depends(get_db)):
 
     # Find Department first
@@ -90,7 +85,7 @@ def get_employees_by_department(dep_id: str, db: Session = Depends(get_db)):
 # =====================================================
 # GET SINGLE DEPARTMENT
 # =====================================================
-@router.get("/{dep_id}", response_model=DepartmentResponse)
+@router.get("/{dep_id:path}", response_model=DepartmentResponse)
 def get_department_by_id(dep_id: str, db: Session = Depends(get_db)):
 
     dept = (
@@ -117,6 +112,13 @@ def get_department_by_id(dep_id: str, db: Session = Depends(get_db)):
 # =====================================================
 @router.post("/", response_model=DepartmentResponse)
 def create_department(dept_data: DepartmentCreate, db: Session = Depends(get_db)):
+    # Check if department name already exists
+    existing_dept = db.query(DepartmentDB.Department).filter(
+        func.lower(DepartmentDB.Department.Dep_name) == func.lower(dept_data.Dep_name)
+    ).first()
+    
+    if existing_dept:
+        raise HTTPException(status_code=400, detail=f"Department with name '{dept_data.Dep_name}' already exists")
 
     new_id = generate_next_dep_id(db)
 
@@ -139,7 +141,7 @@ def create_department(dept_data: DepartmentCreate, db: Session = Depends(get_db)
 # =====================================================
 # UPDATE DEPARTMENT
 # =====================================================
-@router.put("/{dep_id}", response_model=DepartmentResponse)
+@router.put("/{dep_id:path}", response_model=DepartmentResponse)
 def update_department(dep_id: str, dept_data: DepartmentCreate, db: Session = Depends(get_db)):
 
     dept = (
@@ -172,7 +174,7 @@ def update_department(dep_id: str, dept_data: DepartmentCreate, db: Session = De
 # =====================================================
 # DELETE DEPARTMENT
 # =====================================================
-@router.delete("/{dep_id}")
+@router.delete("/{dep_id:path}")
 def delete_department(dep_id: str, db: Session = Depends(get_db)):
 
     dept = (
