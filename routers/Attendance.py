@@ -86,6 +86,13 @@ def update_attendance(
     db.commit()
     return {"message": "Success"}
 
+@router.get("/record/{emp_id}")
+def AttendanceofEmployee(emp_id:str,db:Session = Depends(get_db)):
+    record = db.query(EmplyeeDB.Attendance).filter(
+        EmplyeeDB.Attendance.Emp_id == emp_id
+    ).all()
+    return record
+
 @router.get("/check-status")
 def check_attendance_status(attendance_date: date_type, db: Session = Depends(get_db)):
     """
