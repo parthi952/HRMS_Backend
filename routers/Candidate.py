@@ -4,7 +4,7 @@ from typing import List, Optional
 from database import get_db
 import module.CandidateDB as CandidateDB
 import Schemas.CandidateSchemas as CandidateSchemas
-from FileUpload.BlobFile import generate_file_url, upload_file, generate_blob_name
+from FileUpload.BlobFile import upload_file, generate_file_url, generate_blob_name
 
 router = APIRouter(prefix="/candidates", tags=["Candidates"])
 
@@ -86,12 +86,20 @@ def create_candidate(
         resume_blob_name = None
 
         resume_blob_name = None
+        
 
         if Resume_path:
 
-            resume_blob_name = generate_blob_name(Resume_path.filename)
+            resume_blob_name  = upload_file(
+            file=Resume_path.file,
+            blob_name=Resume_path.filename,
+            folder="candidate_resumes"
+        )
+        # if Resume_path:
 
-            upload_file(Resume_path.file, resume_blob_name, Resume_path.content_type)
+        #     resume_blob_name = generate_blob_name(Resume_path.filename)
+
+        #     upload_file(Resume_path.file, resume_blob_name, Resume_path.content_type)
 
         # 2. Create Candidate
         db_candidate = CandidateDB.Candidate(
@@ -233,8 +241,6 @@ def get_candidate(id: int, db: Session = Depends(get_db)):
     data.total_stages_count = total_stages
     data.stages_list = stages_list
 
-    if candidate.Resume_path:
-        candidate.Resume_path = generate_file_url(candidate.Resume_path)
     return data
 
 
@@ -422,8 +428,9 @@ def update_interview(
         next_master_stage = (
             db.query(CandidateDB.Stage)
             .filter(
-                CandidateDB.Stage.Stage_index == current_master_stage.Stage_index + 1
+                CandidateDB.Stage.Stage_index > current_master_stage.Stage_index
             )
+            .order_by(CandidateDB.Stage.Stage_index)
             .first()
         )
 
