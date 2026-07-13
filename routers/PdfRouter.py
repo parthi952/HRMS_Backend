@@ -160,7 +160,7 @@ def download_offer_letter_pdf(
 
 # ─── New Payslip Generation & Azure Blob Storage Upload Endpoints ─────────────
 
-from FileUpload.BlobFile import upload_file, generate_file_url, generate_blob_name
+from FileUpload.BlobFile import upload_file, generate_blob_name
 from module.PayrollDB import PayslipReport
 import io
 
@@ -191,10 +191,7 @@ def generate_and_upload_payslip(
         PayslipReport.month == month
     ).first()
     if existing:
-        # Re-generate fresh SAS URL
-        blob_name = existing.blob_url.split("/")[-1].split("?")[0]
-        fresh_url = generate_file_url(blob_name)
-        return {"message": "Payslip already uploaded. Here is the fresh URL.", "url": fresh_url}
+        return {"message": "Payslip already uploaded.", "url": existing.blob_url}
 
     # 3. Calculate payroll
     annual_salary = float(emp.annualSalary or 0)
@@ -256,9 +253,8 @@ def generate_and_upload_payslip(
     try:
         filename = f"payslip_{emp_id}_{month.replace(' ', '_')}.pdf"
         blob_name = generate_blob_name(filename)
-        # Wrap in io.BytesIO for Azure upload compatibility
         pdf_stream = io.BytesIO(pdf_bytes)
-        sas_url = upload_file(pdf_stream, blob_name, content_type="application/pdf")
+        sas_url = upload_file(pdf_stream, blob_name, folder="payslips")
     except Exception as e:
         logger.error(f"Failed to upload payslip to Azure Storage: {e}")
         raise HTTPException(
@@ -302,13 +298,10 @@ def get_all_uploaded_payslips(
 
     results = []
     for r in reports:
-        # Extract the plain blob name to generate a fresh, non-expired SAS URL
-        blob_name = r.blob_url.split("/")[-1].split("?")[0]
-        fresh_url = generate_file_url(blob_name)
         results.append({
             "id": r.id,
             "month": r.month,
-            "url": fresh_url,
+            "url": r.blob_url,
             "uploaded_at": r.uploaded_at.isoformat()
         })
 

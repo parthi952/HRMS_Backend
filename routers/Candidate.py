@@ -4,7 +4,7 @@ from typing import List, Optional
 from database import get_db
 import module.CandidateDB as CandidateDB
 import Schemas.CandidateSchemas as CandidateSchemas
-from FileUpload.BlobFile import upload_file, generate_file_url, generate_blob_name
+from FileUpload.BlobFile import upload_file, generate_blob_name
 
 router = APIRouter(prefix="/candidates", tags=["Candidates"])
 
@@ -163,9 +163,6 @@ def list_candidates(db: Session = Depends(get_db)):
 
     results = []
     for c in candidates:
-        if c.Resume_path:
-            c.Resume_path = generate_file_url(c.Resume_path)
-            
         completed_stages = (
             db.query(CandidateDB.CandidateStage)
             .filter(

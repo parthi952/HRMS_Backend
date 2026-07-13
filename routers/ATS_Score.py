@@ -10,7 +10,7 @@ from module.JobPosterDB import ATS_KeySkills
 from module.ATSScoreDB import CandidateATSScore
 from Schemas.PosterSchemas import ATS_PostSchema
 from ATS_System.ATSScore import calculate_ats_score_for_post
-from FileUpload.BlobFile import blob_service_client, container_name
+import requests
 
 router = APIRouter(
     prefix="/ats_score",
@@ -31,12 +31,9 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 
 def download_blob_to_bytes(blob_name: str) -> bytes:
     try:
-        blob_client = blob_service_client.get_blob_client(
-            container=container_name,
-            blob=blob_name
-        )
-        stream = blob_client.download_blob()
-        return stream.readall()
+        response = requests.get(blob_name)
+        response.raise_for_status()
+        return response.content
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
