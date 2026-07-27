@@ -10,6 +10,7 @@ from routers import (CustomID,Department,
     JobPost,
     ATS_Score,
 )
+from Caluclation import Currency
 from routers import Attendance as att
 from routers import Leave
 from routers import option, Requirement
@@ -37,7 +38,7 @@ from database import engine, get_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # This automatically creates the tables in PostgreSQL/MySQL on startup
+
     EmplyeeDB.Base.metadata.create_all(bind=engine)
     ATSScoreDB.Base.metadata.create_all(bind=engine)
     yield
@@ -46,7 +47,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan,root_path="/api")
 
-# CORS setup so your frontend can talk to this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -94,7 +94,7 @@ app.include_router(JobPost.router)
 
 app.include_router(ATS_Score.router)
 
-
+app.include_router(Currency.router,prefix="/currency")
 app.include_router(daily_tasks_router)
 
 app.include_router(PortAccses.router, prefix="/PortAccses")
