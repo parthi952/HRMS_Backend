@@ -492,6 +492,27 @@ def delete_employee(emp_id: str, db: Session = Depends(get_db)):
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     try:
+        from Auth.models import User
+        from module.PayrollDB import Payroll, PayslipReport
+        from DailyTaskReport.moduale import DailyTaskReport, TaskAssign
+
+        db.query(PayslipReport).filter(PayslipReport.emp_id == emp_id).delete()
+        db.query(Payroll).filter(Payroll.emp_id == emp_id).delete()
+        db.query(DailyTaskReport).filter(DailyTaskReport.Emp_id == emp_id).delete()
+        db.query(TaskAssign).filter(TaskAssign.Emp_id == emp_id).delete()
+        db.query(EmplyeeDB.LeaveHistoryDB).filter(EmplyeeDB.LeaveHistoryDB.Emp_id == emp_id).delete()
+        db.query(EmplyeeDB.LeaveDB).filter(EmplyeeDB.LeaveDB.Emp_id == emp_id).delete()
+        db.query(EmplyeeDB.Attendance).filter(EmplyeeDB.Attendance.Emp_id == emp_id).delete()
+
+        for fam in db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).all():
+            db.query(EmplyeeDB.Nominees).filter(EmplyeeDB.Nominees.family_id == fam.id).delete()
+        db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).delete()
+
+        db.query(EmplyeeDB.WorkExpriance).filter(EmplyeeDB.WorkExpriance.emp_id == emp_id).delete()
+        db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).delete()
+
+        db.query(User).filter(User.emp_id == emp_id).update({"emp_id": None})
+
         db.delete(emp)
         db.commit()
         return {"message": f"Employee {emp_id} deleted successfully"}
