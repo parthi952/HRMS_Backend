@@ -481,3 +481,20 @@ def update_employee_work_exp(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Delete Employee ──────────────────────────────────────────────────────────
+
+
+@router.delete("/{emp_id}")
+def delete_employee(emp_id: str, db: Session = Depends(get_db)):
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    try:
+        db.delete(emp)
+        db.commit()
+        return {"message": f"Employee {emp_id} deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

@@ -21,6 +21,7 @@ from EmployeePort.ActiveBatch import router as active_batch_router
 from routers.PdfRouter import router as pdf_router
 from DailyTaskReport.Routere import router as daily_tasks_router
 from UserPassword import PortAccsesRoute as PortAccses
+from Auth.sso_router import router as sso_router
 # pyrefly: ignore [missing-import]
 from ManagerPort.M_Leave import router as ManagerPort_Leave
 
@@ -97,6 +98,7 @@ app.include_router(ATS_Score.router)
 app.include_router(Currency.router,prefix="/currency")
 app.include_router(daily_tasks_router)
 
+app.include_router(sso_router)
 app.include_router(PortAccses.router, prefix="/PortAccses")
 app.include_router(PortAccses.router, prefix="/Auth")
 app.include_router(ManagerPort_Leave)
