@@ -125,6 +125,118 @@ def check_attendance_status(attendance_date: date_type, db: Session = Depends(ge
         "status": "Healthy" if len(missing_ids) == 0 else "Out of Sync"
     }
 
+@router.put("/check-in")
+def admin_check_in(payload: dict, db: Session = Depends(get_db)):
+    emp_id = payload.get("emp_id")
+    if not emp_id:
+        raise HTTPException(status_code=400, detail="emp_id is required")
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    today = date_type.today()
+    record = db.query(EmplyeeDB.Attendance).filter(
+        EmplyeeDB.Attendance.Emp_id == emp_id,
+        EmplyeeDB.Attendance.date == today
+    ).first()
+    if not record:
+        record = EmplyeeDB.Attendance(
+            Emp_id=emp_id,
+            employee_name=emp.name,
+            date=today,
+            status="Pending",
+            check_in=None,
+            check_out=None
+        )
+        db.add(record)
+    from datetime import datetime
+    now_str = datetime.now().strftime("%I:%M %p")
+    record.check_in = now_str
+    record.status = "Present"
+    db.commit()
+    return {"message": "Check-in recorded", "check_in": now_str}
+
+
+@router.put("/check-out")
+def admin_check_out(payload: dict, db: Session = Depends(get_db)):
+    emp_id = payload.get("emp_id")
+    if not emp_id:
+        raise HTTPException(status_code=400, detail="emp_id is required")
+    today = date_type.today()
+    record = db.query(EmplyeeDB.Attendance).filter(
+        EmplyeeDB.Attendance.Emp_id == emp_id,
+        EmplyeeDB.Attendance.date == today
+    ).first()
+    if not record or not record.check_in:
+        raise HTTPException(status_code=400, detail="Must check in before checking out")
+    from datetime import datetime
+    now_str = datetime.now().strftime("%I:%M %p")
+    record.check_out = now_str
+    db.commit()
+    return {"message": "Check-out recorded", "check_out": now_str}
+
+
+@router.put("/update")
+def admin_update_attendance(payload: dict, db: Session = Depends(get_db)):
+    emp_id = payload.get("Emp_id") or payload.get("emp_id")
+    att_date_str = payload.get("date")
+    if not emp_id or not att_date_str:
+        raise HTTPException(status_code=400, detail="Emp_id and date are required")
+    try:
+        att_date = date_type.fromisoformat(att_date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format (use YYYY-MM-DD)")
+    record = db.query(EmplyeeDB.Attendance).filter(
+        EmplyeeDB.Attendance.Emp_id == emp_id,
+        EmplyeeDB.Attendance.date == att_date
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+    if "check_in" in payload:
+        record.check_in = payload["check_in"]
+    if "check_out" in payload:
+        record.check_out = payload["check_out"]
+    if "status" in payload:
+        record.status = payload["status"]
+    db.commit()
+    return {"message": "Attendance updated"}
+
+
+@router.post("/bulk")
+def bulk_upsert_attendance(records: list, db: Session = Depends(get_db)):
+    from datetime import datetime as dt
+    count = 0
+    for rec in records:
+        emp_id = rec.get("Emp_id") or rec.get("emp_id")
+        att_date_str = rec.get("date")
+        if not emp_id or not att_date_str:
+            continue
+        try:
+            att_date = date_type.fromisoformat(att_date_str)
+        except ValueError:
+            continue
+        record = db.query(EmplyeeDB.Attendance).filter(
+            EmplyeeDB.Attendance.Emp_id == emp_id,
+            EmplyeeDB.Attendance.date == att_date
+        ).first()
+        if not record:
+            emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+            record = EmplyeeDB.Attendance(
+                Emp_id=emp_id,
+                employee_name=emp.name if emp else emp_id,
+                date=att_date,
+            )
+            db.add(record)
+        if "check_in" in rec:
+            record.check_in = rec["check_in"]
+        if "check_out" in rec:
+            record.check_out = rec["check_out"]
+        if "status" in rec:
+            record.status = rec["status"]
+        count += 1
+    db.commit()
+    return {"message": f"{count} attendance records saved"}
+
+
 @router.post("/sync-missing")
 def sync_missing_attendance(attendance_date: date_type, db: Session = Depends(get_db)):
     """

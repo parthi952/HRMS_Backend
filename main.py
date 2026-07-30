@@ -3,12 +3,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2 import Date
 from sqlalchemy.orm import Session
-from routers import (CustomID,Department,
+from routers import (CustomID, Department,
     PayRoll,
     employee,
     Candidate,
     JobPost,
     ATS_Score,
+    Dashboard,
+    OffBoard,
+    Compat,
 )
 from Caluclation import Currency
 from routers import Attendance as att
@@ -37,11 +40,15 @@ import module.ATSScoreDB as ATSScoreDB
 from database import engine, get_db
 
 
+import module.OffBoardDB as OffBoardDB
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     EmplyeeDB.Base.metadata.create_all(bind=engine)
     ATSScoreDB.Base.metadata.create_all(bind=engine)
+    OffBoardDB.Base.metadata.create_all(bind=engine)
     yield
     print("Shutting down...")
 
@@ -102,3 +109,8 @@ app.include_router(sso_router)
 app.include_router(PortAccses.router, prefix="/PortAccses")
 app.include_router(PortAccses.router, prefix="/Auth")
 app.include_router(ManagerPort_Leave)
+
+# New routers to fill frontend gaps
+app.include_router(Dashboard.router)
+app.include_router(OffBoard.router)
+app.include_router(Compat.router)

@@ -543,6 +543,42 @@ def get_candidate_stages(candidate_id: int, db: Session = Depends(get_db)):
     return results
 
 
+@router.get("/{id}/resume")
+def download_candidate_resume(id: int, db: Session = Depends(get_db)):
+    candidate = db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.id == id).first()
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    if not candidate.Resume_path:
+        raise HTTPException(404, "No resume uploaded for this candidate")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=candidate.Resume_path)
+
+
+# ─── Stage path aliases for frontend ─────────────────────────────────────────
+
+
+@router.put("/stages/update/{stage_id}")
+def update_stage_alias(stage_id: int, stage_in: CandidateSchemas.StageBase, db: Session = Depends(get_db)):
+    db_stage = db.query(CandidateDB.Stage).filter(CandidateDB.Stage.id == stage_id).first()
+    if not db_stage:
+        raise HTTPException(404, "Stage not found")
+    db_stage.Stage_name = stage_in.Stage_name
+    db_stage.Stage_index = stage_in.Stage_index
+    db.commit()
+    db.refresh(db_stage)
+    return db_stage
+
+
+@router.delete("/stages/delete/{stage_id}")
+def delete_stage_alias(stage_id: int, db: Session = Depends(get_db)):
+    db_stage = db.query(CandidateDB.Stage).filter(CandidateDB.Stage.id == stage_id).first()
+    if not db_stage:
+        raise HTTPException(404, "Stage not found")
+    db.delete(db_stage)
+    db.commit()
+    return {"message": "Stage deleted successfully"}
+
+
 @router.post("/BulkSchedule")
 def bulk_schedule_interviews(
     bulk_in: CandidateSchemas.BulkInterviewCreate, db: Session = Depends(get_db)

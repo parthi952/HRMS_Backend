@@ -11,10 +11,11 @@ class User(Base):
     __tablename__ = "users"
 
     id            = Column(Integer, primary_key=True, index=True)
+    username      = Column(String, unique=True, index=True, nullable=True)
     email         = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False)
+    password      = Column(String, nullable=False)
     role          = Column(String, default="employee")  # options: admin, hr, manager, employee
     emp_id        = Column(String, ForeignKey("employees.Emp_id", ondelete="SET NULL"), nullable=True)
 
     # Relationship back to Employee profile if linked
-    employee = relationship("Employee")
+    employee = relationship("Employee")
