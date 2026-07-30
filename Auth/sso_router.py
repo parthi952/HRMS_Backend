@@ -227,6 +227,147 @@ def _finish_sso(email: str):
         db.close()
 
 
+@router.post("/sync")
+async def sso_sync_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    cfg = _load_config()
+    synced = []
+    errors = []
+
+    if cfg.get("microsoft", {}).get("enabled"):
+        m = cfg["microsoft"]
+        tenant = m.get("tenant", "common")
+        try:
+            async with httpx.AsyncClient() as client:
+                token_resp = await client.post(
+                    f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                    data={
+                        "client_id": m["client_id"],
+                        "client_secret": m["client_secret"],
+                        "scope": "https://graph.microsoft.com/.default",
+                        "grant_type": "client_credentials",
+                    },
+                )
+                tokens = token_resp.json()
+                if "access_token" not in tokens:
+                    errors.append({"provider": "microsoft", "error": tokens.get("error_description", "Failed to get app token. Ensure 'User.Read.All' application permission is granted.")})
+                else:
+                    users_resp = await client.get(
+                        "https://graph.microsoft.com/v1.0/users?$select=displayName,mail,userPrincipalName,jobTitle,department&$top=999",
+                        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+                    )
+                    users_data = users_resp.json()
+                    for u in users_data.get("value", []):
+                        email = (u.get("mail") or u.get("userPrincipalName") or "").lower().strip()
+                        if not email:
+                            continue
+                        existing = db.query(User).filter(User.email == email).first()
+                        if not existing:
+                            from Auth.Encrypt import hash_password
+                            new_user = User(
+                                email=email,
+                                password=hash_password(secrets.token_urlsafe(16)),
+                                role="employee",
+                            )
+                            db.add(new_user)
+                            synced.append({
+                                "email": email,
+                                "name": u.get("displayName", ""),
+                                "provider": "microsoft",
+                                "status": "created",
+                            })
+                        else:
+                            synced.append({
+                                "email": email,
+                                "name": u.get("displayName", ""),
+                                "provider": "microsoft",
+                                "status": "exists",
+                            })
+        except Exception as e:
+            errors.append({"provider": "microsoft", "error": str(e)})
+
+    if cfg.get("google", {}).get("enabled"):
+        g = cfg["google"]
+        try:
+            async with httpx.AsyncClient() as client:
+                token_resp = await client.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={
+                        "client_id": g["client_id"],
+                        "client_secret": g["client_secret"],
+                        "grant_type": "client_credentials",
+                        "scope": "https://www.googleapis.com/auth/admin.directory.user.readonly",
+                    },
+                )
+                tokens = token_resp.json()
+                if "access_token" not in tokens:
+                    errors.append({"provider": "google", "error": "Google Directory API requires Workspace Admin SDK with domain-wide delegation. Use Microsoft SSO sync or add users manually."})
+                else:
+                    domain = g.get("domain", "")
+                    users_resp = await client.get(
+                        f"https://admin.googleapis.com/admin/directory/v1/users?domain={domain}&maxResults=500",
+                        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+                    )
+                    users_data = users_resp.json()
+                    for u in users_data.get("users", []):
+                        email = u.get("primaryEmail", "").lower().strip()
+                        if not email:
+                            continue
+                        existing = db.query(User).filter(User.email == email).first()
+                        if not existing:
+                            from Auth.Encrypt import hash_password
+                            new_user = User(
+                                email=email,
+                                password=hash_password(secrets.token_urlsafe(16)),
+                                role="employee",
+                            )
+                            db.add(new_user)
+                            synced.append({"email": email, "name": u.get("name", {}).get("fullName", ""), "provider": "google", "status": "created"})
+                        else:
+                            synced.append({"email": email, "name": u.get("name", {}).get("fullName", ""), "provider": "google", "status": "exists"})
+        except Exception as e:
+            errors.append({"provider": "google", "error": str(e)})
+
+    db.commit()
+    created_count = len([s for s in synced if s["status"] == "created"])
+    existing_count = len([s for s in synced if s["status"] == "exists"])
+    return {"synced": synced, "errors": errors, "created": created_count, "existing": existing_count}
+
+
+@router.get("/users")
+def sso_list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    users = db.query(User).all()
+    return [
+        {
+            "id": u.id,
+            "email": u.email,
+            "role": u.role,
+            "emp_id": u.emp_id,
+            "name": u.employee.name if u.employee else u.email.split("@")[0],
+        }
+        for u in users
+    ]
+
+
+@router.put("/users/{user_id}/role")
+def sso_update_role(user_id: int, data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    new_role = data.get("role", "employee")
+    if new_role not in ("admin", "hr", "manager", "employee"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    user.role = new_role
+    db.commit()
+    return {"message": f"Role updated to {new_role}"}
+
+
 @router.post("/exchange")
 def sso_exchange(data: dict):
     _cleanup_codes()
