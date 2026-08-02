@@ -25,3 +25,4 @@ python-dotenv
 weasyprint
 cloudinary
 psycopg[binary]
+apscheduler

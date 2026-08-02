@@ -29,6 +29,8 @@ from UserPassword import PortAccsesRoute as PortAccses
 from Auth.sso_router import router as sso_router
 # pyrefly: ignore [missing-import]
 from ManagerPort.M_Leave import router as ManagerPort_Leave
+from Festival.FestivalRouter import router as festival_router, seed_default_festivals, run_daily_festival_check
+from apscheduler.schedulers.background import BackgroundScheduler
 
 
 
@@ -39,10 +41,18 @@ import DailyTaskReport.moduale as DailyTaskReportDB
 import module.CandidateDB as CandidateDB
 import module.RequirementDB as RequirementDB
 import module.ATSScoreDB as ATSScoreDB
+import module.FestivalDB as FestivalDB
 from database import engine, get_db
 
 
 import module.OffBoardDB as OffBoardDB
+
+scheduler = BackgroundScheduler()
+
+
+def _festival_job():
+    import asyncio
+    asyncio.run(run_daily_festival_check())
 
 
 @asynccontextmanager
@@ -51,7 +61,14 @@ async def lifespan(app: FastAPI):
     EmplyeeDB.Base.metadata.create_all(bind=engine)
     ATSScoreDB.Base.metadata.create_all(bind=engine)
     OffBoardDB.Base.metadata.create_all(bind=engine)
+    FestivalDB.Base.metadata.create_all(bind=engine)
+    seed_default_festivals()
+
+    scheduler.add_job(_festival_job, "cron", hour=8, minute=30, id="festival_check", replace_existing=True)
+    scheduler.start()
+
     yield
+    scheduler.shutdown(wait=False)
     print("Shutting down...")
 
 
@@ -120,3 +137,4 @@ app.include_router(ManagerPort_Leave)
 app.include_router(Dashboard.router)
 app.include_router(OffBoard.router)
 app.include_router(Compat.router)
+app.include_router(festival_router)
