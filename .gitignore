@@ -3,3 +3,4 @@
 __pycache__
 .git
 *.pyc
+Auth/sso_codes.json

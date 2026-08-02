@@ -1,11 +1,12 @@
 """
 SSO Router for HRMS — Google & Microsoft OAuth 2.0 Authorization Code Flow.
-Config stored as JSON on disk, temporary codes in memory.
+Config stored as JSON on disk, temporary codes in a shared file store.
 """
 import os
 import json
 import secrets
 import time
+import fcntl
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -19,10 +20,9 @@ from Auth.router import get_current_user
 router = APIRouter(prefix="/Auth/sso", tags=["SSO"])
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sso_config.json")
+CODES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sso_codes.json")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://hrm.tibostech.in")
 API_URL = os.getenv("API_URL", "https://hrm-api.tibostech.in")
-
-_sso_codes: dict = {}
 
 
 def _load_config() -> dict:
@@ -37,11 +37,44 @@ def _save_config(cfg: dict):
         json.dump(cfg, f, indent=2)
 
 
+def _with_codes_lock(mutate_fn):
+    # Gunicorn runs multiple worker processes; an in-memory dict would not be
+    # shared between them, so SSO state/codes are persisted to a locked file
+    # that every worker reads and writes.
+    if not os.path.exists(CODES_PATH):
+        open(CODES_PATH, "a").close()
+    with open(CODES_PATH, "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            content = f.read().strip()
+            codes = json.loads(content) if content else {}
+            result = mutate_fn(codes)
+            f.seek(0)
+            f.truncate()
+            json.dump(codes, f)
+            return result
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _set_code(key: str, value: dict):
+    def mutate(codes):
+        codes[key] = value
+    _with_codes_lock(mutate)
+
+
+def _pop_code(key: str):
+    def mutate(codes):
+        return codes.pop(key, None)
+    return _with_codes_lock(mutate)
+
+
 def _cleanup_codes():
-    now = time.time()
-    expired = [k for k, v in _sso_codes.items() if v["expires"] < now]
-    for k in expired:
-        del _sso_codes[k]
+    def mutate(codes):
+        now = time.time()
+        for k in [k for k, v in codes.items() if v["expires"] < now]:
+            del codes[k]
+    _with_codes_lock(mutate)
 
 
 @router.get("/config/public")
@@ -106,7 +139,7 @@ def sso_login_google():
     if not g.get("enabled"):
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
     state = secrets.token_urlsafe(32)
-    _sso_codes[f"state:{state}"] = {"provider": "google", "expires": time.time() + 600}
+    _set_code(f"state:{state}", {"provider": "google", "expires": time.time() + 600})
     params = {
         "client_id": g["client_id"],
         "redirect_uri": f"{API_URL}/Auth/sso/callback/google",
@@ -128,7 +161,7 @@ def sso_login_microsoft():
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
     tenant = m.get("tenant", "common")
     state = secrets.token_urlsafe(32)
-    _sso_codes[f"state:{state}"] = {"provider": "microsoft", "expires": time.time() + 600}
+    _set_code(f"state:{state}", {"provider": "microsoft", "expires": time.time() + 600})
     params = {
         "client_id": m["client_id"],
         "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
@@ -146,7 +179,7 @@ async def sso_callback_google(code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
     _cleanup_codes()
-    state_data = _sso_codes.pop(f"state:{state}", None)
+    state_data = _pop_code(f"state:{state}")
     if not state_data or state_data["provider"] != "google":
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_state")
 
@@ -181,7 +214,7 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
     if error:
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
     _cleanup_codes()
-    state_data = _sso_codes.pop(f"state:{state}", None)
+    state_data = _pop_code(f"state:{state}")
     if not state_data or state_data["provider"] != "microsoft":
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_state")
 
@@ -221,7 +254,7 @@ def _finish_sso(email: str):
         if not user:
             return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=user_not_provisioned")
         sso_code = secrets.token_urlsafe(48)
-        _sso_codes[sso_code] = {"email": email, "expires": time.time() + 120}
+        _set_code(sso_code, {"email": email, "expires": time.time() + 120})
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_code={sso_code}")
     finally:
         db.close()
@@ -372,7 +405,7 @@ def sso_update_role(user_id: int, data: dict, current_user: User = Depends(get_c
 def sso_exchange(data: dict):
     _cleanup_codes()
     code = data.get("code", "")
-    code_data = _sso_codes.pop(code, None)
+    code_data = _pop_code(code)
     if not code_data or "email" not in code_data:
         raise HTTPException(status_code=400, detail="Invalid or expired SSO code")
     if code_data["expires"] < time.time():
