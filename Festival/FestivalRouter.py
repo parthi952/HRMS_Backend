@@ -13,6 +13,24 @@ import module.EmplyeeDB as EmplyeeDB
 
 router = APIRouter(prefix="/festivals", tags=["Festival Wishes"])
 
+# Automated startup migration for columns added after the table already
+# existed in production (Base.metadata.create_all only creates new tables,
+# it never alters existing ones).
+try:
+    from database import engine
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        for col in [
+            "ALTER TABLE festival_wishes ADD COLUMN audience VARCHAR DEFAULT 'employees';",
+        ]:
+            try:
+                conn.execute(text(col))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+except Exception:
+    pass
+
 
 def _is_today(wish: FestivalDB.FestivalWish, today: date) -> bool:
     if wish.recurs_yearly:
