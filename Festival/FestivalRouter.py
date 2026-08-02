@@ -28,7 +28,12 @@ def _serialize(w: FestivalDB.FestivalWish):
         "message": w.message,
         "recurs_yearly": w.recurs_yearly,
         "enabled": w.enabled,
+        "audience": w.audience or "employees",
     }
+
+
+def _serialize_contact(c: FestivalDB.WishContact):
+    return {"id": c.id, "name": c.name, "email": c.email, "enabled": c.enabled}
 
 
 @router.get("/today")
@@ -57,12 +62,16 @@ def create_wish(data: dict, current_user: User = Depends(get_current_user), db: 
         wish_date = datetime.strptime(data["date"], "%Y-%m-%d").date()
     except (KeyError, ValueError):
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    audience = data.get("audience", "employees")
+    if audience not in ("employees", "customers", "both"):
+        audience = "employees"
     wish = FestivalDB.FestivalWish(
         name=data.get("name", "").strip() or "Festival",
         date=wish_date,
         message=data.get("message", "").strip() or "Wishing you a happy celebration!",
         recurs_yearly=bool(data.get("recurs_yearly", True)),
         enabled=bool(data.get("enabled", True)),
+        audience=audience,
     )
     db.add(wish)
     db.commit()
@@ -90,6 +99,8 @@ def update_wish(wish_id: int, data: dict, current_user: User = Depends(get_curre
         wish.recurs_yearly = bool(data["recurs_yearly"])
     if "enabled" in data:
         wish.enabled = bool(data["enabled"])
+    if "audience" in data and data["audience"] in ("employees", "customers", "both"):
+        wish.audience = data["audience"]
     db.commit()
     db.refresh(wish)
     return _serialize(wish)
@@ -107,14 +118,62 @@ def delete_wish(wish_id: int, current_user: User = Depends(get_current_user), db
     return {"message": "Deleted"}
 
 
-async def _send_graph_email(subject: str, body_html: str, bcc_recipients: list):
-    cfg = _load_sso_config()
-    m = cfg.get("microsoft", {})
-    if not m.get("enabled") or not m.get("client_id") or not m.get("client_secret"):
-        return False, "Microsoft SSO is not configured (Admin > SSO Settings)"
-    sender = os.getenv("GRAPH_SENDER_EMAIL")
-    if not sender:
-        return False, "GRAPH_SENDER_EMAIL environment variable is not set"
+# ── Customer / external contacts (audience for "customers" / "both" sends) ──
+
+@router.get("/contacts")
+def list_contacts(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    contacts = db.query(FestivalDB.WishContact).order_by(FestivalDB.WishContact.name).all()
+    return [_serialize_contact(c) for c in contacts]
+
+
+@router.post("/contacts")
+def create_contact(data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip()
+    if not name or not email:
+        raise HTTPException(status_code=400, detail="name and email are required")
+    contact = FestivalDB.WishContact(name=name, email=email, enabled=bool(data.get("enabled", True)))
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+    return _serialize_contact(contact)
+
+
+@router.put("/contacts/{contact_id}")
+def update_contact(contact_id: int, data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    contact = db.query(FestivalDB.WishContact).filter(FestivalDB.WishContact.id == contact_id).first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Not found")
+    if "name" in data:
+        contact.name = data["name"].strip() or contact.name
+    if "email" in data:
+        contact.email = data["email"].strip() or contact.email
+    if "enabled" in data:
+        contact.enabled = bool(data["enabled"])
+    db.commit()
+    db.refresh(contact)
+    return _serialize_contact(contact)
+
+
+@router.delete("/contacts/{contact_id}")
+def delete_contact(contact_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    contact = db.query(FestivalDB.WishContact).filter(FestivalDB.WishContact.id == contact_id).first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(contact)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+async def _get_graph_token(m: dict):
     tenant = m.get("tenant", "common")
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
@@ -127,27 +186,37 @@ async def _send_graph_email(subject: str, body_html: str, bcc_recipients: list):
             },
         )
         tokens = token_resp.json()
-        if "access_token" not in tokens:
-            return False, tokens.get("error_description", "Failed to authenticate with Microsoft Graph")
-
-        message = {
-            "message": {
-                "subject": subject,
-                "body": {"contentType": "HTML", "content": body_html},
-                "toRecipients": [{"emailAddress": {"address": sender}}],
-                "bccRecipients": [{"emailAddress": {"address": r}} for r in bcc_recipients],
-            },
-            "saveToSentItems": "true",
-        }
-        resp = await client.post(
-            f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
-            headers={"Authorization": f"Bearer {tokens['access_token']}"},
-            json=message,
-        )
-        return resp.status_code == 202, (resp.text if resp.status_code != 202 else "sent")
+        return tokens.get("access_token"), tokens.get("error_description")
 
 
-def _build_wish_html(wish: FestivalDB.FestivalWish) -> str:
+async def _send_single_email(client: httpx.AsyncClient, access_token: str, sender: str, subject: str, body_html: str, to_email: str) -> bool:
+    message = {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "HTML", "content": body_html},
+            "toRecipients": [{"emailAddress": {"address": to_email}}],
+        },
+        "saveToSentItems": "true",
+    }
+    resp = await client.post(
+        f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json=message,
+    )
+    return resp.status_code == 202
+
+
+def _merge_message(message: str, name: str) -> str:
+    """Simple mail-merge: replaces {{name}} / {name} placeholders with the recipient's name."""
+    return (
+        message
+        .replace("{{name}}", name).replace("{{Name}}", name)
+        .replace("{name}", name).replace("{Name}", name)
+    )
+
+
+def _build_wish_html(wish: FestivalDB.FestivalWish, message: str = None) -> str:
+    message = message if message is not None else wish.message
     return f"""
 <table cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;width:525pt;max-width:100%;font-family:Aptos, Calibri, Helvetica, sans-serif;">
   <tr>
@@ -158,7 +227,7 @@ def _build_wish_html(wish: FestivalDB.FestivalWish) -> str:
   </tr>
   <tr>
     <td style="padding:26.25pt 26.25pt 11.25pt;">
-      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;">{wish.message}</div>
+      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;">{message}</div>
     </td>
   </tr>
   <tr>
@@ -189,17 +258,53 @@ def _build_wish_html(wish: FestivalDB.FestivalWish) -> str:
 """.strip()
 
 
+def _get_recipients(wish: FestivalDB.FestivalWish, db: Session):
+    audience = wish.audience or "employees"
+    recipients = []
+    if audience in ("employees", "both"):
+        emp_rows = db.query(EmplyeeDB.Employee.name, EmplyeeDB.Employee.email).filter(
+            EmplyeeDB.Employee.Status == "Active", EmplyeeDB.Employee.email.isnot(None)
+        ).all()
+        recipients += [(name or "Team Member", email) for name, email in emp_rows if email]
+    if audience in ("customers", "both"):
+        cust_rows = db.query(FestivalDB.WishContact.name, FestivalDB.WishContact.email).filter(
+            FestivalDB.WishContact.enabled == True
+        ).all()
+        recipients += [(name or "Valued Customer", email) for name, email in cust_rows if email]
+    return recipients
+
+
 async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
-    recipients = [
-        e for (e,) in db.query(EmplyeeDB.Employee.email)
-        .filter(EmplyeeDB.Employee.Status == "Active", EmplyeeDB.Employee.email.isnot(None))
-        .all()
-        if e
-    ]
+    recipients = _get_recipients(wish, db)
     if not recipients:
-        return False, "No active employee emails found"
-    body_html = _build_wish_html(wish)
-    return await _send_graph_email(f"🎉 {wish.name} Wishes from TIBOS", body_html, recipients)
+        return False, "No recipients found for this wish's audience"
+
+    cfg = _load_sso_config()
+    m = cfg.get("microsoft", {})
+    if not m.get("enabled") or not m.get("client_id") or not m.get("client_secret"):
+        return False, "Microsoft SSO is not configured (Admin > SSO Settings)"
+    sender = os.getenv("GRAPH_SENDER_EMAIL")
+    if not sender:
+        return False, "GRAPH_SENDER_EMAIL environment variable is not set"
+
+    access_token, error = await _get_graph_token(m)
+    if not access_token:
+        return False, error or "Failed to authenticate with Microsoft Graph"
+
+    subject = f"🎉 {wish.name} Wishes from TIBOS"
+    sent, failed = 0, 0
+    async with httpx.AsyncClient() as client:
+        for name, email in recipients:
+            body_html = _build_wish_html(wish, _merge_message(wish.message, name))
+            ok = await _send_single_email(client, access_token, sender, subject, body_html, email)
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+
+    if sent == 0:
+        return False, f"All {failed} email(s) failed to send"
+    return True, f"Sent to {sent} recipient(s)" + (f", {failed} failed" if failed else "")
 
 
 @router.post("/send-now/{wish_id}")
@@ -214,7 +319,7 @@ async def send_now(wish_id: int, current_user: User = Depends(get_current_user),
         raise HTTPException(status_code=502, detail=f"Email not sent: {detail}")
     wish.last_email_sent_year = date.today().year
     db.commit()
-    return {"message": "Wish email sent"}
+    return {"message": detail}
 
 
 async def run_daily_festival_check():
