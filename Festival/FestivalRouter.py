@@ -147,6 +147,48 @@ async def _send_graph_email(subject: str, body_html: str, bcc_recipients: list):
         return resp.status_code == 202, (resp.text if resp.status_code != 202 else "sent")
 
 
+def _build_wish_html(wish: FestivalDB.FestivalWish) -> str:
+    return f"""
+<table cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;width:525pt;max-width:100%;font-family:Aptos, Calibri, Helvetica, sans-serif;">
+  <tr>
+    <td style="background-color:#9EE4FF;padding:22.5pt 15pt 18.75pt;text-align:center;color:#000;">
+      <div style="line-height:120%;margin:0 0 8pt;font-family:Verdana, Geneva, sans-serif;font-size:18pt;font-weight:bold;">{wish.name}</div>
+      <div style="line-height:120%;margin:0 0 8pt;font-family:'Trebuchet MS', Trebuchet, sans-serif;font-size:20pt;font-weight:bold;">🎉 Wishing You a Very Happy {wish.name}! 🎉</div>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:26.25pt 26.25pt 11.25pt;">
+      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;">{wish.message}</div>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:11.25pt 26.25pt 18.75pt;">
+      <table cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+        <tr>
+          <td style="background-color:#9EE4FF;padding:15pt 18.75pt;color:#000;text-align:center;">
+            <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;font-weight:bold;">From all of us at TIBOS 💛</div>
+            <div style="line-height:1.38;font-size:11pt;">Wishing you and your family joy, prosperity and togetherness.</div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td style="background-color:#E8EDF4;height:0.75pt;">&nbsp;</td></tr>
+  <tr>
+    <td style="background-color:#FAFBFD;padding:26.25pt;">
+      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;font-weight:bold;color:#000;">TIBOS Solutions &amp; Services Pvt. Ltd.</div>
+      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;">
+        <span>🌐 </span><span style="color:#467886;"><a href="http://www.tibos.co.in" style="color:#467886;">www.tibos.co.in</a></span>
+        <span>&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;📧&nbsp;</span><span style="color:#467886;"><a href="mailto:secure@tibos.in" style="color:#467886;">secure@tibos.in</a></span>
+        <span>&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;📞&nbsp;+91 92821 09750</span>
+      </div>
+      <div style="line-height:1.38;font-size:11pt;color:#000;">Wishing our entire team a joyful and safe celebration.</div>
+    </td>
+  </tr>
+</table>
+""".strip()
+
+
 async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
     recipients = [
         e for (e,) in db.query(EmplyeeDB.Employee.email)
@@ -156,8 +198,8 @@ async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
     ]
     if not recipients:
         return False, "No active employee emails found"
-    body_html = f"<div style='font-family:sans-serif;font-size:15px;line-height:1.6'>{wish.message}</div>"
-    return await _send_graph_email(f"🎉 {wish.name} Wishes from Tibos", body_html, recipients)
+    body_html = _build_wish_html(wish)
+    return await _send_graph_email(f"🎉 {wish.name} Wishes from TIBOS", body_html, recipients)
 
 
 @router.post("/send-now/{wish_id}")
