@@ -1,6 +1,7 @@
 import os
+import uuid
 from datetime import date, datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 import httpx
 
@@ -8,6 +9,7 @@ from database import get_db, SessionLocal
 from Auth.models import User
 from Auth.router import get_current_user
 from Auth.sso_router import _load_config as _load_sso_config
+from FileUpload.BlobFile import upload_file
 import module.FestivalDB as FestivalDB
 import module.EmplyeeDB as EmplyeeDB
 
@@ -22,6 +24,8 @@ try:
     with engine.connect() as conn:
         for col in [
             "ALTER TABLE festival_wishes ADD COLUMN audience VARCHAR DEFAULT 'employees';",
+            "ALTER TABLE festival_wishes ADD COLUMN cc_emails VARCHAR;",
+            "ALTER TABLE festival_wishes ADD COLUMN from_email VARCHAR;",
         ]:
             try:
                 conn.execute(text(col))
@@ -47,6 +51,21 @@ def _serialize(w: FestivalDB.FestivalWish):
         "recurs_yearly": w.recurs_yearly,
         "enabled": w.enabled,
         "audience": w.audience or "employees",
+        "cc_emails": w.cc_emails or "",
+        "from_email": w.from_email or "",
+    }
+
+
+def _serialize_log(log: FestivalDB.WishSendLog):
+    return {
+        "id": log.id,
+        "recipient_name": log.recipient_name,
+        "to_email": log.to_email,
+        "cc_emails": log.cc_emails,
+        "from_email": log.from_email,
+        "status": log.status,
+        "error": log.error,
+        "sent_at": log.sent_at.isoformat() if log.sent_at else None,
     }
 
 
@@ -90,6 +109,8 @@ def create_wish(data: dict, current_user: User = Depends(get_current_user), db: 
         recurs_yearly=bool(data.get("recurs_yearly", True)),
         enabled=bool(data.get("enabled", True)),
         audience=audience,
+        cc_emails=data.get("cc_emails", "").strip() or None,
+        from_email=data.get("from_email", "").strip() or None,
     )
     db.add(wish)
     db.commit()
@@ -119,6 +140,10 @@ def update_wish(wish_id: int, data: dict, current_user: User = Depends(get_curre
         wish.enabled = bool(data["enabled"])
     if "audience" in data and data["audience"] in ("employees", "customers", "both"):
         wish.audience = data["audience"]
+    if "cc_emails" in data:
+        wish.cc_emails = data["cc_emails"].strip() or None
+    if "from_email" in data:
+        wish.from_email = data["from_email"].strip() or None
     db.commit()
     db.refresh(wish)
     return _serialize(wish)
@@ -191,6 +216,27 @@ def delete_contact(contact_id: int, current_user: User = Depends(get_current_use
     return {"message": "Deleted"}
 
 
+@router.post("/upload-image")
+def upload_wish_image(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    url = upload_file(file.file, file.filename or f"{uuid.uuid4()}.png", folder="festival_images")
+    return {"url": url}
+
+
+@router.get("/{wish_id}/logs")
+def get_wish_logs(wish_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    logs = (
+        db.query(FestivalDB.WishSendLog)
+        .filter(FestivalDB.WishSendLog.wish_id == wish_id)
+        .order_by(FestivalDB.WishSendLog.sent_at.desc())
+        .all()
+    )
+    return [_serialize_log(l) for l in logs]
+
+
 async def _get_graph_token(m: dict):
     tenant = m.get("tenant", "common")
     async with httpx.AsyncClient() as client:
@@ -207,8 +253,16 @@ async def _get_graph_token(m: dict):
         return tokens.get("access_token"), tokens.get("error_description")
 
 
-async def _send_single_email(client: httpx.AsyncClient, access_token: str, sender: str, subject: str, body_html: str, to_email: str) -> bool:
-    message = {
+async def _send_single_email(
+    client: httpx.AsyncClient,
+    access_token: str,
+    sender: str,
+    subject: str,
+    body_html: str,
+    to_email: str,
+    cc_list: list = None,
+):
+    payload = {
         "message": {
             "subject": subject,
             "body": {"contentType": "HTML", "content": body_html},
@@ -216,12 +270,14 @@ async def _send_single_email(client: httpx.AsyncClient, access_token: str, sende
         },
         "saveToSentItems": "true",
     }
+    if cc_list:
+        payload["message"]["ccRecipients"] = [{"emailAddress": {"address": c}} for c in cc_list]
     resp = await client.post(
         f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
         headers={"Authorization": f"Bearer {access_token}"},
-        json=message,
+        json=payload,
     )
-    return resp.status_code == 202
+    return resp.status_code == 202, (resp.text if resp.status_code != 202 else None)
 
 
 def _merge_message(message: str, name: str) -> str:
@@ -301,24 +357,36 @@ async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
     m = cfg.get("microsoft", {})
     if not m.get("enabled") or not m.get("client_id") or not m.get("client_secret"):
         return False, "Microsoft SSO is not configured (Admin > SSO Settings)"
-    sender = os.getenv("GRAPH_SENDER_EMAIL")
+    sender = (wish.from_email or "").strip() or os.getenv("GRAPH_SENDER_EMAIL")
     if not sender:
-        return False, "GRAPH_SENDER_EMAIL environment variable is not set"
+        return False, "No from-email set — set one on the wish, or set GRAPH_SENDER_EMAIL on the server"
 
     access_token, error = await _get_graph_token(m)
     if not access_token:
         return False, error or "Failed to authenticate with Microsoft Graph"
 
+    cc_list = [c.strip() for c in (wish.cc_emails or "").split(",") if c.strip()]
     subject = f"🎉 {wish.name} Wishes from TIBOS"
     sent, failed = 0, 0
     async with httpx.AsyncClient() as client:
         for name, email in recipients:
             body_html = _build_wish_html(wish, _merge_message(wish.message, name))
-            ok = await _send_single_email(client, access_token, sender, subject, body_html, email)
+            ok, err = await _send_single_email(client, access_token, sender, subject, body_html, email, cc_list)
+            db.add(FestivalDB.WishSendLog(
+                wish_id=wish.id,
+                wish_name=wish.name,
+                recipient_name=name,
+                to_email=email,
+                cc_emails=wish.cc_emails,
+                from_email=sender,
+                status="sent" if ok else "failed",
+                error=None if ok else err,
+            ))
             if ok:
                 sent += 1
             else:
                 failed += 1
+        db.commit()
 
     if sent == 0:
         return False, f"All {failed} email(s) failed to send"
