@@ -27,6 +27,9 @@ try:
             "ALTER TABLE festival_wishes ADD COLUMN cc_emails VARCHAR;",
             "ALTER TABLE festival_wishes ADD COLUMN from_email VARCHAR;",
             "ALTER TABLE festival_wishes ADD COLUMN template_id INTEGER;",
+            "ALTER TABLE wish_templates ADD COLUMN logo_url VARCHAR;",
+            "ALTER TABLE wish_templates ADD COLUMN logo_width INTEGER DEFAULT 120;",
+            "ALTER TABLE wish_templates ADD COLUMN logo_align VARCHAR DEFAULT 'center';",
         ]:
             try:
                 conn.execute(text(col))
@@ -69,6 +72,9 @@ def _serialize_template(t: FestivalDB.WishTemplate):
         "footer_html": t.footer_html,
         "footer_bg_color": t.footer_bg_color,
         "is_default": t.is_default,
+        "logo_url": t.logo_url or "",
+        "logo_width": t.logo_width or 120,
+        "logo_align": t.logo_align or "center",
     }
 
 
@@ -207,6 +213,9 @@ def create_template(data: dict, current_user: User = Depends(get_current_user), 
         footer_html=data.get("footer_html", "").strip() or "<div>Contact us</div>",
         footer_bg_color=data.get("footer_bg_color") or "#FAFBFD",
         is_default=bool(data.get("is_default", False)),
+        logo_url=data.get("logo_url", "").strip() or None,
+        logo_width=data.get("logo_width") or 120,
+        logo_align=data.get("logo_align") or "center",
     )
     db.add(template)
     db.commit()
@@ -235,6 +244,12 @@ def update_template(template_id: int, data: dict, current_user: User = Depends(g
         template.footer_html = data["footer_html"]
     if "footer_bg_color" in data:
         template.footer_bg_color = data["footer_bg_color"] or template.footer_bg_color
+    if "logo_url" in data:
+        template.logo_url = data["logo_url"].strip() or None
+    if "logo_width" in data:
+        template.logo_width = data["logo_width"] or template.logo_width
+    if "logo_align" in data:
+        template.logo_align = data["logo_align"] or template.logo_align
     if data.get("is_default"):
         db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.id != template_id).update({"is_default": False})
         template.is_default = True
@@ -402,6 +417,14 @@ def _get_template_for_wish(wish: FestivalDB.FestivalWish, db: Session) -> Festiv
 def _build_wish_html(wish: FestivalDB.FestivalWish, template: FestivalDB.WishTemplate, message: str = None) -> str:
     message = message if message is not None else wish.message
     header = template.header_html.replace("{{festival_name}}", wish.name).replace("{festival_name}", wish.name)
+    logo_html = ""
+    if template.logo_url:
+        align_margin = {
+            "left": "margin:0 auto 10pt 0;",
+            "right": "margin:0 0 10pt auto;",
+        }.get(template.logo_align or "center", "margin:0 auto 10pt auto;")
+        logo_html = f'<img src="{template.logo_url}" alt="" width="{template.logo_width or 120}" style="display:block;{align_margin}max-width:100%;" />'
+        header = logo_html + header
     highlight_block = ""
     if template.highlight_html:
         highlight_block = f"""

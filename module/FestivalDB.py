@@ -31,6 +31,9 @@ class WishTemplate(Base):
     footer_html = Column(Text, nullable=False)       # contact details / sign-off
     footer_bg_color = Column(String, default="#FAFBFD")
     is_default = Column(Boolean, default=False)
+    logo_url = Column(String, nullable=True)
+    logo_width = Column(Integer, default=120)   # px
+    logo_align = Column(String, default="center")  # "left" | "center" | "right"
 
 
 class WishContact(Base):
