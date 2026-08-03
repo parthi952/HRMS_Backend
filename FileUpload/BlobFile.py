@@ -152,4 +152,7 @@ def upload_file(
     dest_path = os.path.join(folder_dir, public_id)
     with open(dest_path, "wb") as out:
         out.write(file.read())
-    return f"{API_URL}/uploads/{folder}/{public_id}"
+    # The app is created with root_path="/api", which Starlette applies to
+    # mounted sub-apps (like the /uploads StaticFiles mount) even though
+    # normal routes don't need it — so the public URL must include /api.
+    return f"{API_URL}/api/uploads/{folder}/{public_id}"
