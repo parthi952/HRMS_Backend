@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, subqueryload
+from sqlalchemy import func, case, text
 from typing import List, Optional
 from database import get_db
 import module.CandidateDB as CandidateDB
@@ -158,23 +159,40 @@ def create_candidate(
 
 @router.get("/all", response_model=List[CandidateSchemas.CandidateResponse])
 def list_candidates(db: Session = Depends(get_db)):
-    candidates = db.query(CandidateDB.Candidate).all()
     total_stages = db.query(CandidateDB.Stage).count()
+
+    completed_sub = (
+        db.query(
+            CandidateDB.CandidateStage.candidate_id,
+            func.count().label("completed"),
+        )
+        .filter(CandidateDB.CandidateStage.Stage_status == "Completed")
+        .group_by(CandidateDB.CandidateStage.candidate_id)
+        .subquery()
+    )
+
+    candidates = (
+        db.query(CandidateDB.Candidate)
+        .options(subqueryload(CandidateDB.Candidate.stages).joinedload(CandidateDB.CandidateStage.stage))
+        .all()
+    )
+
+    completed_map = {
+        row.candidate_id: row.completed
+        for row in db.query(completed_sub).all()
+    }
 
     results = []
     for c in candidates:
-        completed_stages = (
-            db.query(CandidateDB.CandidateStage)
-            .filter(
-                CandidateDB.CandidateStage.candidate_id == c.id,
-                CandidateDB.CandidateStage.Stage_status == "Completed",
-            )
-            .count()
-        )
-        
+        current_stage = "Applied"
+        for cs in c.stages:
+            if cs.Stage_status == "In Progress" and cs.stage:
+                current_stage = cs.stage.Stage_name
+                break
+
         data = CandidateSchemas.CandidateResponse.from_orm(c)
-        data.current_candidate_stage = get_current_stage(db, c.id)
-        data.completed_stages_count = completed_stages
+        data.current_candidate_stage = current_stage
+        data.completed_stages_count = completed_map.get(c.id, 0)
         data.total_stages_count = total_stages
         results.append(data)
 
@@ -239,6 +257,24 @@ def get_candidate(id: int, db: Session = Depends(get_db)):
     data.stages_list = stages_list
 
     return data
+
+
+@router.delete("/{id}")
+def delete_candidate(id: int, db: Session = Depends(get_db)):
+    candidate = db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.id == id).first()
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    try:
+        from module.ATSScoreDB import CandidateATSScore
+        db.query(CandidateATSScore).filter(CandidateATSScore.candidate_id == id).delete()
+        db.query(CandidateDB.Interview).filter(CandidateDB.Interview.candidate_id == id).delete()
+        db.query(CandidateDB.CandidateStage).filter(CandidateDB.CandidateStage.candidate_id == id).delete()
+        db.delete(candidate)
+        db.commit()
+        return {"message": f"Candidate {candidate.Candidate_ID} deleted"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, detail=str(e))
 
 
 @router.put("/Update/{id}")
@@ -505,6 +541,42 @@ def get_candidate_stages(candidate_id: int, db: Session = Depends(get_db)):
         data.Stage_name = s.stage.Stage_name if s.stage else ""
         results.append(data)
     return results
+
+
+@router.get("/{id}/resume")
+def download_candidate_resume(id: int, db: Session = Depends(get_db)):
+    candidate = db.query(CandidateDB.Candidate).filter(CandidateDB.Candidate.id == id).first()
+    if not candidate:
+        raise HTTPException(404, "Candidate not found")
+    if not candidate.Resume_path:
+        raise HTTPException(404, "No resume uploaded for this candidate")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=candidate.Resume_path)
+
+
+# ─── Stage path aliases for frontend ─────────────────────────────────────────
+
+
+@router.put("/stages/update/{stage_id}")
+def update_stage_alias(stage_id: int, stage_in: CandidateSchemas.StageBase, db: Session = Depends(get_db)):
+    db_stage = db.query(CandidateDB.Stage).filter(CandidateDB.Stage.id == stage_id).first()
+    if not db_stage:
+        raise HTTPException(404, "Stage not found")
+    db_stage.Stage_name = stage_in.Stage_name
+    db_stage.Stage_index = stage_in.Stage_index
+    db.commit()
+    db.refresh(db_stage)
+    return db_stage
+
+
+@router.delete("/stages/delete/{stage_id}")
+def delete_stage_alias(stage_id: int, db: Session = Depends(get_db)):
+    db_stage = db.query(CandidateDB.Stage).filter(CandidateDB.Stage.id == stage_id).first()
+    if not db_stage:
+        raise HTTPException(404, "Stage not found")
+    db.delete(db_stage)
+    db.commit()
+    return {"message": "Stage deleted successfully"}
 
 
 @router.post("/BulkSchedule")

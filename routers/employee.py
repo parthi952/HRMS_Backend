@@ -185,6 +185,23 @@ def list_employees(db: Session = Depends(get_db)):
     return employees
 
 
+@router.patch("/{emp_id}/status")
+def update_employee_status(
+    emp_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    new_status = payload.get("status")
+    if new_status not in ("Active", "Inactive", "Terminated"):
+        raise HTTPException(status_code=400, detail="Invalid status. Use: Active, Inactive, Terminated")
+    emp.Status = new_status
+    db.commit()
+    return {"message": f"Employee {emp_id} status updated to {new_status}"}
+
+
 @router.put("/EmployeeUpdate/{emp_id}")
 def update_employee(
     emp_id: str,
@@ -478,6 +495,98 @@ def update_employee_work_exp(
         return {
             "message": f"Successfully updated work experience for employee {emp_id}"
         }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Salary / Bank / Insurance (standalone for AddEmployee wizard) ────────────
+
+
+@router.post("/Salary")
+def create_employee_salary(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    emp_id = payload.get("emp_id") or payload.get("Emp_id")
+    if not emp_id:
+        raise HTTPException(status_code=400, detail="emp_id is required")
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    for field in ("annualSalary", "payType", "currency", "payFrequency", "provider", "bonus_Type", "bonus_CalculationMode", "bonus_Value"):
+        if field in payload:
+            setattr(emp, field, payload[field])
+    db.commit()
+    return {"message": f"Salary details saved for {emp_id}"}
+
+
+@router.post("/BankDetails")
+def create_employee_bank(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    emp_id = payload.get("emp_id") or payload.get("Emp_id")
+    if not emp_id:
+        raise HTTPException(status_code=400, detail="emp_id is required")
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    for field in ("bankName", "accountNumber", "ifscCode", "panNumber"):
+        if field in payload:
+            setattr(emp, field, payload[field])
+    db.commit()
+    return {"message": f"Bank details saved for {emp_id}"}
+
+
+@router.post("/Insurance")
+def create_employee_insurance(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    emp_id = payload.get("emp_id") or payload.get("Emp_id")
+    if not emp_id:
+        raise HTTPException(status_code=400, detail="emp_id is required")
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    for field in ("apply_esi", "uan_number", "pf_id", "insurance_no", "aadhar_no", "esi_no", "esi_name", "insurance_provider"):
+        if field in payload:
+            setattr(emp, field, payload[field])
+    db.commit()
+    return {"message": f"Insurance/PF details saved for {emp_id}"}
+
+
+# ─── Delete Employee ──────────────────────────────────────────────────────────
+
+
+@router.delete("/{emp_id}")
+def delete_employee(emp_id: str, db: Session = Depends(get_db)):
+    emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    try:
+        from sqlalchemy import text
+        eid = emp_id
+
+        db.execute(text('DELETE FROM payslip_reports WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM payroll WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM "PayRoll" WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM daily_task_report WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM task_assign WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM leavehistory WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM leave WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM attendance WHERE "Emp_id" = :id'), {"id": eid})
+        db.execute(text('DELETE FROM nominee WHERE family_id IN (SELECT id FROM "Familys" WHERE emp_id = :id)'), {"id": eid})
+        db.execute(text('DELETE FROM "Familys" WHERE emp_id = :id'), {"id": eid})
+        db.execute(text('DELETE FROM dependents WHERE emp_id = :id'), {"id": eid})
+        db.execute(text('DELETE FROM "Work" WHERE emp_id = :id'), {"id": eid})
+        db.execute(text('DELETE FROM education WHERE emp_id = :id'), {"id": eid})
+        db.execute(text('UPDATE users SET emp_id = NULL WHERE emp_id = :id'), {"id": eid})
+        db.execute(text('DELETE FROM employees WHERE "Emp_id" = :id'), {"id": eid})
+
+        db.commit()
+        return {"message": f"Employee {emp_id} deleted successfully"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

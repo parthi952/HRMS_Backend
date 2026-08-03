@@ -96,12 +96,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
-    secure=True
-)
+# Cloudinary is used when credentials are present; otherwise files are saved
+# to local disk and served via the /uploads static route (see main.py).
+_CLOUDINARY_ENABLED = bool(os.getenv("CLOUDINARY_CLOUD_NAME"))
+
+if _CLOUDINARY_ENABLED:
+    cloudinary.config(
+        cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+        api_key=os.getenv("CLOUDINARY_API_KEY"),
+        api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+        secure=True
+    )
+
+UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
+UPLOADS_DIR = os.path.abspath(UPLOADS_DIR)
+API_URL = os.getenv("API_URL", "https://hrm-api.tibostech.in")
 
 
 # =========================
@@ -128,12 +137,22 @@ def upload_file(
 
     public_id = generate_blob_name(blob_name)
 
-    result = cloudinary.uploader.upload(
-        file=file,
-        folder=folder,
-        public_id=public_id,
-        resource_type="auto",
-        overwrite=True
-    )
+    if _CLOUDINARY_ENABLED:
+        result = cloudinary.uploader.upload(
+            file=file,
+            folder=folder,
+            public_id=public_id,
+            resource_type="auto",
+            overwrite=True
+        )
+        return result["secure_url"]
 
-    return result["secure_url"]
+    folder_dir = os.path.join(UPLOADS_DIR, folder)
+    os.makedirs(folder_dir, exist_ok=True)
+    dest_path = os.path.join(folder_dir, public_id)
+    with open(dest_path, "wb") as out:
+        out.write(file.read())
+    # The app is created with root_path="/api", which Starlette applies to
+    # mounted sub-apps (like the /uploads StaticFiles mount) even though
+    # normal routes don't need it — so the public URL must include /api.
+    return f"{API_URL}/api/uploads/{folder}/{public_id}"

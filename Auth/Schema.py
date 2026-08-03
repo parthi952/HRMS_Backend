@@ -26,16 +26,8 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    email: str
+    username: str
     password: str
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v: str) -> str:
-        v = v.strip().lower()
-        if "@" not in v:
-            raise ValueError("Invalid email address")
-        return v
 
 
 class Token(BaseModel):
@@ -54,6 +46,7 @@ class TokenRefreshRequest(BaseModel):
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    username: Optional[str] = None
     email: str
     role: str
     emp_id: Optional[str] = None

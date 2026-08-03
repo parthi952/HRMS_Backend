@@ -69,14 +69,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     # ✅ LOGIN ENDPOINT (POST)
 @router.post("/login", response_model=Token)
 def login(login_data: UserLogin, db: Session = Depends(get_db)):
-    ensure_default_users(db)
-    
     # Find user by email
     user = db.query(User).filter(User.email == login_data.email).first()
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            detail="Invalid username or password"
         )
     
     # Create tokens
@@ -132,3 +130,5 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
