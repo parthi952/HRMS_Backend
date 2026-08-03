@@ -1,17 +1,15 @@
-import os
 import uuid
 from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-import httpx
 
 from database import get_db, SessionLocal
 from Auth.models import User
 from Auth.router import get_current_user
-from Auth.sso_router import _load_config as _load_sso_config
 from FileUpload.BlobFile import upload_file
 import module.FestivalDB as FestivalDB
-import module.EmplyeeDB as EmplyeeDB
+from Festival import common
+from Festival import EmailSending
 
 router = APIRouter(prefix="/festivals", tags=["Festival Wishes"])
 
@@ -338,6 +336,77 @@ def upload_wish_image(file: UploadFile = File(...), current_user: User = Depends
     return {"url": url}
 
 
+# ── Email sending configuration (Microsoft 365 / Google) — shared by ──
+# ── both Festival Wishes and Commercial Emails ──
+
+@router.get("/email-config")
+def get_email_config(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    cfg = EmailSending.get_or_create_config(db)
+    return {
+        "provider": cfg.provider or "",
+        "microsoft": {
+            "client_id": cfg.ms_client_id or "",
+            "client_secret_set": bool(cfg.ms_client_secret),
+            "tenant": cfg.ms_tenant or "common",
+            "sender_email": cfg.ms_sender_email or "",
+        },
+        "google": {
+            "service_account_set": bool(cfg.google_service_account_json),
+            "sender_email": cfg.google_sender_email or "",
+        },
+    }
+
+
+@router.post("/email-config")
+def save_email_config(data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    provider = data.get("provider")
+    if provider not in ("microsoft", "google"):
+        raise HTTPException(status_code=400, detail="provider must be 'microsoft' or 'google'")
+    cfg = EmailSending.get_or_create_config(db)
+    cfg.provider = provider
+
+    ms = data.get("microsoft", {})
+    if ms.get("client_id"):
+        cfg.ms_client_id = ms["client_id"].strip()
+    if ms.get("client_secret"):
+        cfg.ms_client_secret = ms["client_secret"].strip()
+    if ms.get("tenant"):
+        cfg.ms_tenant = ms["tenant"].strip()
+    if "sender_email" in ms:
+        cfg.ms_sender_email = ms["sender_email"].strip() or None
+
+    google = data.get("google", {})
+    if google.get("service_account_json"):
+        cfg.google_service_account_json = google["service_account_json"].strip()
+    if "sender_email" in google:
+        cfg.google_sender_email = google["sender_email"].strip() or None
+
+    db.commit()
+    return {"message": "Email configuration saved"}
+
+
+@router.post("/email-config/test")
+async def test_email_config(data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    to_email = data.get("to_email", "").strip()
+    if not to_email:
+        raise HTTPException(status_code=400, detail="to_email is required")
+    ok, err = await EmailSending.send_email(
+        db,
+        "TIBOS HRMS — Test Email",
+        "<p>This is a test email from your HRMS Celebrations email configuration. If you received this, sending is working correctly.</p>",
+        to_email,
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail=err or "Test email failed to send")
+    return {"message": f"Test email sent to {to_email}"}
+
+
 @router.get("/{wish_id}/logs")
 def get_wish_logs(wish_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.role != "admin":
@@ -351,175 +420,37 @@ def get_wish_logs(wish_id: int, current_user: User = Depends(get_current_user), 
     return [_serialize_log(l) for l in logs]
 
 
-async def _get_graph_token(m: dict):
-    tenant = m.get("tenant", "common")
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
-            f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
-            data={
-                "client_id": m["client_id"],
-                "client_secret": m["client_secret"],
-                "scope": "https://graph.microsoft.com/.default",
-                "grant_type": "client_credentials",
-            },
-        )
-        tokens = token_resp.json()
-        return tokens.get("access_token"), tokens.get("error_description")
-
-
-async def _send_single_email(
-    client: httpx.AsyncClient,
-    access_token: str,
-    sender: str,
-    subject: str,
-    body_html: str,
-    to_email: str,
-    cc_list: list = None,
-):
-    payload = {
-        "message": {
-            "subject": subject,
-            "body": {"contentType": "HTML", "content": body_html},
-            "toRecipients": [{"emailAddress": {"address": to_email}}],
-        },
-        "saveToSentItems": "true",
-    }
-    if cc_list:
-        payload["message"]["ccRecipients"] = [{"emailAddress": {"address": c}} for c in cc_list]
-    resp = await client.post(
-        f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
-        headers={"Authorization": f"Bearer {access_token}"},
-        json=payload,
-    )
-    return resp.status_code == 202, (resp.text if resp.status_code != 202 else None)
-
-
-def _merge_message(message: str, name: str) -> str:
-    """Simple mail-merge: replaces {{name}} / {name} placeholders with the recipient's name."""
-    return (
-        message
-        .replace("{{name}}", name).replace("{{Name}}", name)
-        .replace("{name}", name).replace("{Name}", name)
-    )
-
-
-def _get_template_for_wish(wish: FestivalDB.FestivalWish, db: Session) -> FestivalDB.WishTemplate:
-    template = None
-    if wish.template_id:
-        template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.id == wish.template_id).first()
-    if not template:
-        template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.is_default == True).first()
-    if not template:
-        template = db.query(FestivalDB.WishTemplate).order_by(FestivalDB.WishTemplate.id).first()
-    return template
-
-
-def _build_wish_html(wish: FestivalDB.FestivalWish, template: FestivalDB.WishTemplate, message: str = None) -> str:
-    message = message if message is not None else wish.message
-    header = template.header_html.replace("{{festival_name}}", wish.name).replace("{festival_name}", wish.name)
-    logo_html = ""
-    if template.logo_url:
-        align_margin = {
-            "left": "margin:0 auto 10pt 0;",
-            "right": "margin:0 0 10pt auto;",
-        }.get(template.logo_align or "center", "margin:0 auto 10pt auto;")
-        logo_html = f'<img src="{template.logo_url}" alt="" width="{template.logo_width or 120}" style="display:block;{align_margin}max-width:100%;" />'
-        header = logo_html + header
-    highlight_block = ""
-    if template.highlight_html:
-        highlight_block = f"""
-  <tr>
-    <td style="padding:11.25pt 26.25pt 18.75pt;">
-      <table cellspacing="0" cellpadding="0" border="0" style="width:100%;">
-        <tr>
-          <td style="background-color:{template.highlight_bg_color};padding:15pt 18.75pt;color:#000;text-align:center;">
-            {template.highlight_html}
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>"""
-    return f"""
-<table cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;width:525pt;max-width:100%;font-family:Aptos, Calibri, Helvetica, sans-serif;">
-  <tr>
-    <td style="background-color:{template.header_bg_color};padding:22.5pt 15pt 18.75pt;text-align:center;color:#000;">
-      {header}
-    </td>
-  </tr>
-  <tr>
-    <td style="padding:26.25pt 26.25pt 11.25pt;">
-      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;">{message}</div>
-    </td>
-  </tr>{highlight_block}
-  <tr><td style="background-color:#E8EDF4;height:0.75pt;">&nbsp;</td></tr>
-  <tr>
-    <td style="background-color:{template.footer_bg_color};padding:26.25pt;">
-      {template.footer_html}
-    </td>
-  </tr>
-</table>
-""".strip()
-
-
-def _get_recipients(wish: FestivalDB.FestivalWish, db: Session):
-    audience = wish.audience or "employees"
-    recipients = []
-    if audience in ("employees", "both"):
-        emp_rows = db.query(EmplyeeDB.Employee.name, EmplyeeDB.Employee.email).filter(
-            EmplyeeDB.Employee.Status == "Active", EmplyeeDB.Employee.email.isnot(None)
-        ).all()
-        recipients += [(name or "Team Member", email) for name, email in emp_rows if email]
-    if audience in ("customers", "both"):
-        cust_rows = db.query(FestivalDB.WishContact.name, FestivalDB.WishContact.email).filter(
-            FestivalDB.WishContact.enabled == True
-        ).all()
-        recipients += [(name or "Valued Customer", email) for name, email in cust_rows if email]
-    return recipients
-
-
 async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
-    recipients = _get_recipients(wish, db)
+    recipients = common.get_recipients(wish.audience, db)
     if not recipients:
         return False, "No recipients found for this wish's audience"
 
-    template = _get_template_for_wish(wish, db)
+    template = common.get_template(wish.template_id, db)
     if not template:
         return False, "No email template configured — add one from Celebrations > Email Templates"
 
-    cfg = _load_sso_config()
-    m = cfg.get("microsoft", {})
-    if not m.get("enabled") or not m.get("client_id") or not m.get("client_secret"):
-        return False, "Microsoft SSO is not configured (Admin > SSO Settings)"
-    sender = (wish.from_email or "").strip() or os.getenv("GRAPH_SENDER_EMAIL")
-    if not sender:
-        return False, "No from-email set — set one on the wish, or set GRAPH_SENDER_EMAIL on the server"
-
-    access_token, error = await _get_graph_token(m)
-    if not access_token:
-        return False, error or "Failed to authenticate with Microsoft Graph"
-
+    sender_override = (wish.from_email or "").strip() or None
     cc_list = [c.strip() for c in (wish.cc_emails or "").split(",") if c.strip()]
     subject = f"🎉 {wish.name} Wishes from TIBOS"
     sent, failed = 0, 0
-    async with httpx.AsyncClient() as client:
-        for name, email in recipients:
-            body_html = _build_wish_html(wish, template, _merge_message(wish.message, name))
-            ok, err = await _send_single_email(client, access_token, sender, subject, body_html, email, cc_list)
-            db.add(FestivalDB.WishSendLog(
-                wish_id=wish.id,
-                wish_name=wish.name,
-                recipient_name=name,
-                to_email=email,
-                cc_emails=wish.cc_emails,
-                from_email=sender,
-                status="sent" if ok else "failed",
-                error=None if ok else err,
-            ))
-            if ok:
-                sent += 1
-            else:
-                failed += 1
-        db.commit()
+    for name, email in recipients:
+        body_html = common.build_email_html(wish.name, template, common.merge_message(wish.message, name))
+        ok, err = await EmailSending.send_email(db, subject, body_html, email, cc_list, sender_override)
+        db.add(FestivalDB.WishSendLog(
+            wish_id=wish.id,
+            wish_name=wish.name,
+            recipient_name=name,
+            to_email=email,
+            cc_emails=wish.cc_emails,
+            from_email=sender_override,
+            status="sent" if ok else "failed",
+            error=None if ok else err,
+        ))
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+    db.commit()
 
     if sent == 0:
         return False, f"All {failed} email(s) failed to send"

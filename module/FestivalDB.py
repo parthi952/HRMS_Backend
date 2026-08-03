@@ -58,3 +58,52 @@ class WishSendLog(Base):
     status = Column(String, nullable=False)  # "sent" | "failed"
     error = Column(String, nullable=True)
     sent_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CommercialEmail(Base):
+    """One-off / ad-hoc commercial email campaigns — same send pipeline as
+    Festival Wishes (audience, template, CC, from-email, mail-merge) but
+    with no date or yearly recurrence."""
+    __tablename__ = "commercial_emails"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    audience = Column(String, default="employees")  # "employees" | "customers" | "both"
+    cc_emails = Column(String, nullable=True)
+    from_email = Column(String, nullable=True)
+    template_id = Column(Integer, nullable=True)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CommercialSendLog(Base):
+    __tablename__ = "commercial_send_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email_id = Column(Integer, nullable=False)
+    email_name = Column(String, nullable=False)
+    recipient_name = Column(String, nullable=True)
+    to_email = Column(String, nullable=False)
+    cc_emails = Column(String, nullable=True)
+    from_email = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    error = Column(String, nullable=True)
+    sent_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EmailProviderConfig(Base):
+    """Singleton-style row (id=1) holding which OAuth provider sends mail
+    and its credentials, editable from Celebrations > Email Settings
+    instead of server env vars."""
+    __tablename__ = "email_provider_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String, nullable=True)  # "microsoft" | "google"
+    ms_client_id = Column(String, nullable=True)
+    ms_client_secret = Column(String, nullable=True)
+    ms_tenant = Column(String, default="common")
+    ms_sender_email = Column(String, nullable=True)
+    google_service_account_json = Column(Text, nullable=True)
+    google_sender_email = Column(String, nullable=True)

@@ -30,6 +30,7 @@ from Auth.sso_router import router as sso_router
 # pyrefly: ignore [missing-import]
 from ManagerPort.M_Leave import router as ManagerPort_Leave
 from Festival.FestivalRouter import router as festival_router, seed_default_festivals, seed_default_template, run_daily_festival_check
+from Festival.CommercialRouter import router as commercial_router
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
@@ -139,3 +140,4 @@ app.include_router(Dashboard.router)
 app.include_router(OffBoard.router)
 app.include_router(Compat.router)
 app.include_router(festival_router)
+app.include_router(commercial_router)
