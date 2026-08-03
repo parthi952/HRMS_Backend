@@ -16,6 +16,21 @@ class FestivalWish(Base):
     audience = Column(String, default="employees")  # "employees" | "customers" | "both"
     cc_emails = Column(String, nullable=True)  # comma-separated
     from_email = Column(String, nullable=True)  # overrides GRAPH_SENDER_EMAIL if set
+    template_id = Column(Integer, nullable=True)  # FK to wish_templates.id (nullable — falls back to the default template)
+
+
+class WishTemplate(Base):
+    __tablename__ = "wish_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    header_html = Column(Text, nullable=False)      # supports {{festival_name}}
+    header_bg_color = Column(String, default="#9EE4FF")
+    highlight_html = Column(Text, nullable=True)     # the "from us" callout box
+    highlight_bg_color = Column(String, default="#9EE4FF")
+    footer_html = Column(Text, nullable=False)       # contact details / sign-off
+    footer_bg_color = Column(String, default="#FAFBFD")
+    is_default = Column(Boolean, default=False)
 
 
 class WishContact(Base):

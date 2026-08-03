@@ -29,7 +29,7 @@ from UserPassword import PortAccsesRoute as PortAccses
 from Auth.sso_router import router as sso_router
 # pyrefly: ignore [missing-import]
 from ManagerPort.M_Leave import router as ManagerPort_Leave
-from Festival.FestivalRouter import router as festival_router, seed_default_festivals, run_daily_festival_check
+from Festival.FestivalRouter import router as festival_router, seed_default_festivals, seed_default_template, run_daily_festival_check
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
@@ -63,6 +63,7 @@ async def lifespan(app: FastAPI):
     OffBoardDB.Base.metadata.create_all(bind=engine)
     FestivalDB.Base.metadata.create_all(bind=engine)
     seed_default_festivals()
+    seed_default_template()
 
     scheduler.add_job(_festival_job, "cron", hour=8, minute=30, id="festival_check", replace_existing=True)
     scheduler.start()

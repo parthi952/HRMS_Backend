@@ -26,6 +26,7 @@ try:
             "ALTER TABLE festival_wishes ADD COLUMN audience VARCHAR DEFAULT 'employees';",
             "ALTER TABLE festival_wishes ADD COLUMN cc_emails VARCHAR;",
             "ALTER TABLE festival_wishes ADD COLUMN from_email VARCHAR;",
+            "ALTER TABLE festival_wishes ADD COLUMN template_id INTEGER;",
         ]:
             try:
                 conn.execute(text(col))
@@ -53,6 +54,21 @@ def _serialize(w: FestivalDB.FestivalWish):
         "audience": w.audience or "employees",
         "cc_emails": w.cc_emails or "",
         "from_email": w.from_email or "",
+        "template_id": w.template_id,
+    }
+
+
+def _serialize_template(t: FestivalDB.WishTemplate):
+    return {
+        "id": t.id,
+        "name": t.name,
+        "header_html": t.header_html,
+        "header_bg_color": t.header_bg_color,
+        "highlight_html": t.highlight_html or "",
+        "highlight_bg_color": t.highlight_bg_color,
+        "footer_html": t.footer_html,
+        "footer_bg_color": t.footer_bg_color,
+        "is_default": t.is_default,
     }
 
 
@@ -111,6 +127,7 @@ def create_wish(data: dict, current_user: User = Depends(get_current_user), db: 
         audience=audience,
         cc_emails=data.get("cc_emails", "").strip() or None,
         from_email=data.get("from_email", "").strip() or None,
+        template_id=data.get("template_id") or None,
     )
     db.add(wish)
     db.commit()
@@ -144,6 +161,8 @@ def update_wish(wish_id: int, data: dict, current_user: User = Depends(get_curre
         wish.cc_emails = data["cc_emails"].strip() or None
     if "from_email" in data:
         wish.from_email = data["from_email"].strip() or None
+    if "template_id" in data:
+        wish.template_id = data["template_id"] or None
     db.commit()
     db.refresh(wish)
     return _serialize(wish)
@@ -157,6 +176,86 @@ def delete_wish(wish_id: int, current_user: User = Depends(get_current_user), db
     if not wish:
         raise HTTPException(status_code=404, detail="Not found")
     db.delete(wish)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+# ── Email templates (header/footer/colors) — reusable across festivals ──
+
+@router.get("/templates")
+def list_templates(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    templates = db.query(FestivalDB.WishTemplate).order_by(FestivalDB.WishTemplate.name).all()
+    return [_serialize_template(t) for t in templates]
+
+
+@router.post("/templates")
+def create_template(data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if not data.get("name", "").strip():
+        raise HTTPException(status_code=400, detail="name is required")
+    if data.get("is_default"):
+        db.query(FestivalDB.WishTemplate).update({"is_default": False})
+    template = FestivalDB.WishTemplate(
+        name=data["name"].strip(),
+        header_html=data.get("header_html", "").strip() or "<div>{{festival_name}}</div>",
+        header_bg_color=data.get("header_bg_color") or "#9EE4FF",
+        highlight_html=data.get("highlight_html", "").strip() or None,
+        highlight_bg_color=data.get("highlight_bg_color") or "#9EE4FF",
+        footer_html=data.get("footer_html", "").strip() or "<div>Contact us</div>",
+        footer_bg_color=data.get("footer_bg_color") or "#FAFBFD",
+        is_default=bool(data.get("is_default", False)),
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return _serialize_template(template)
+
+
+@router.put("/templates/{template_id}")
+def update_template(template_id: int, data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Not found")
+    if "name" in data:
+        template.name = data["name"].strip() or template.name
+    if "header_html" in data:
+        template.header_html = data["header_html"]
+    if "header_bg_color" in data:
+        template.header_bg_color = data["header_bg_color"] or template.header_bg_color
+    if "highlight_html" in data:
+        template.highlight_html = data["highlight_html"] or None
+    if "highlight_bg_color" in data:
+        template.highlight_bg_color = data["highlight_bg_color"] or template.highlight_bg_color
+    if "footer_html" in data:
+        template.footer_html = data["footer_html"]
+    if "footer_bg_color" in data:
+        template.footer_bg_color = data["footer_bg_color"] or template.footer_bg_color
+    if data.get("is_default"):
+        db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.id != template_id).update({"is_default": False})
+        template.is_default = True
+    elif "is_default" in data:
+        template.is_default = bool(data["is_default"])
+    db.commit()
+    db.refresh(template)
+    return _serialize_template(template)
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(template_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Not found")
+    if template.is_default:
+        raise HTTPException(status_code=400, detail="Cannot delete the default template — set another one as default first")
+    db.query(FestivalDB.FestivalWish).filter(FestivalDB.FestivalWish.template_id == template_id).update({"template_id": None})
+    db.delete(template)
     db.commit()
     return {"message": "Deleted"}
 
@@ -289,43 +388,50 @@ def _merge_message(message: str, name: str) -> str:
     )
 
 
-def _build_wish_html(wish: FestivalDB.FestivalWish, message: str = None) -> str:
+def _get_template_for_wish(wish: FestivalDB.FestivalWish, db: Session) -> FestivalDB.WishTemplate:
+    template = None
+    if wish.template_id:
+        template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.id == wish.template_id).first()
+    if not template:
+        template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.is_default == True).first()
+    if not template:
+        template = db.query(FestivalDB.WishTemplate).order_by(FestivalDB.WishTemplate.id).first()
+    return template
+
+
+def _build_wish_html(wish: FestivalDB.FestivalWish, template: FestivalDB.WishTemplate, message: str = None) -> str:
     message = message if message is not None else wish.message
+    header = template.header_html.replace("{{festival_name}}", wish.name).replace("{festival_name}", wish.name)
+    highlight_block = ""
+    if template.highlight_html:
+        highlight_block = f"""
+  <tr>
+    <td style="padding:11.25pt 26.25pt 18.75pt;">
+      <table cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+        <tr>
+          <td style="background-color:{template.highlight_bg_color};padding:15pt 18.75pt;color:#000;text-align:center;">
+            {template.highlight_html}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>"""
     return f"""
 <table cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;width:525pt;max-width:100%;font-family:Aptos, Calibri, Helvetica, sans-serif;">
   <tr>
-    <td style="background-color:#9EE4FF;padding:22.5pt 15pt 18.75pt;text-align:center;color:#000;">
-      <div style="line-height:120%;margin:0 0 8pt;font-family:Verdana, Geneva, sans-serif;font-size:18pt;font-weight:bold;">{wish.name}</div>
-      <div style="line-height:120%;margin:0 0 8pt;font-family:'Trebuchet MS', Trebuchet, sans-serif;font-size:20pt;font-weight:bold;">🎉 Wishing You a Very Happy {wish.name}! 🎉</div>
+    <td style="background-color:{template.header_bg_color};padding:22.5pt 15pt 18.75pt;text-align:center;color:#000;">
+      {header}
     </td>
   </tr>
   <tr>
     <td style="padding:26.25pt 26.25pt 11.25pt;">
       <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;">{message}</div>
     </td>
-  </tr>
-  <tr>
-    <td style="padding:11.25pt 26.25pt 18.75pt;">
-      <table cellspacing="0" cellpadding="0" border="0" style="width:100%;">
-        <tr>
-          <td style="background-color:#9EE4FF;padding:15pt 18.75pt;color:#000;text-align:center;">
-            <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;font-weight:bold;">From all of us at TIBOS 💛</div>
-            <div style="line-height:1.38;font-size:11pt;">Wishing you and your family joy, prosperity and togetherness.</div>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+  </tr>{highlight_block}
   <tr><td style="background-color:#E8EDF4;height:0.75pt;">&nbsp;</td></tr>
   <tr>
-    <td style="background-color:#FAFBFD;padding:26.25pt;">
-      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;font-weight:bold;color:#000;">TIBOS Solutions &amp; Services Pvt. Ltd.</div>
-      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;">
-        <span>🌐 </span><span style="color:#467886;"><a href="http://www.tibos.co.in" style="color:#467886;">www.tibos.co.in</a></span>
-        <span>&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;📧&nbsp;</span><span style="color:#467886;"><a href="mailto:secure@tibos.in" style="color:#467886;">secure@tibos.in</a></span>
-        <span>&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;📞&nbsp;+91 92821 09750</span>
-      </div>
-      <div style="line-height:1.38;font-size:11pt;color:#000;">Wishing our entire team a joyful and safe celebration.</div>
+    <td style="background-color:{template.footer_bg_color};padding:26.25pt;">
+      {template.footer_html}
     </td>
   </tr>
 </table>
@@ -353,6 +459,10 @@ async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
     if not recipients:
         return False, "No recipients found for this wish's audience"
 
+    template = _get_template_for_wish(wish, db)
+    if not template:
+        return False, "No email template configured — add one from Celebrations > Email Templates"
+
     cfg = _load_sso_config()
     m = cfg.get("microsoft", {})
     if not m.get("enabled") or not m.get("client_id") or not m.get("client_secret"):
@@ -370,7 +480,7 @@ async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
     sent, failed = 0, 0
     async with httpx.AsyncClient() as client:
         for name, email in recipients:
-            body_html = _build_wish_html(wish, _merge_message(wish.message, name))
+            body_html = _build_wish_html(wish, template, _merge_message(wish.message, name))
             ok, err = await _send_single_email(client, access_token, sender, subject, body_html, email, cc_list)
             db.add(FestivalDB.WishSendLog(
                 wish_id=wish.id,
@@ -450,6 +560,43 @@ def seed_default_festivals():
         ]
         for name, d, msg in defaults:
             db.add(FestivalDB.FestivalWish(name=name, date=d, message=msg, recurs_yearly=True, enabled=True))
+        db.commit()
+    finally:
+        db.close()
+
+
+def seed_default_template():
+    """Seeds one editable default template matching the original hardcoded
+    design, so existing wishes keep looking the same until an admin
+    customizes it from Celebrations > Email Templates."""
+    db = SessionLocal()
+    try:
+        if db.query(FestivalDB.WishTemplate).count() > 0:
+            return
+        db.add(FestivalDB.WishTemplate(
+            name="Default TIBOS Theme",
+            header_html=(
+                '<div style="line-height:120%;margin:0 0 8pt;font-family:Verdana, Geneva, sans-serif;font-size:18pt;font-weight:bold;">{{festival_name}}</div>'
+                '<div style="line-height:120%;margin:0 0 8pt;font-family:\'Trebuchet MS\', Trebuchet, sans-serif;font-size:20pt;font-weight:bold;">🎉 Wishing You a Very Happy {{festival_name}}! 🎉</div>'
+            ),
+            header_bg_color="#9EE4FF",
+            highlight_html=(
+                '<div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;font-weight:bold;">From all of us at TIBOS 💛</div>'
+                '<div style="line-height:1.38;font-size:11pt;">Wishing you and your family joy, prosperity and togetherness.</div>'
+            ),
+            highlight_bg_color="#9EE4FF",
+            footer_html=(
+                '<div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;font-weight:bold;color:#000;">TIBOS Solutions &amp; Services Pvt. Ltd.</div>'
+                '<div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;">'
+                '🌐 <a href="http://www.tibos.co.in" style="color:#467886;">www.tibos.co.in</a>'
+                '&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;📧 <a href="mailto:secure@tibos.in" style="color:#467886;">secure@tibos.in</a>'
+                '&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;📞 +91 92821 09750'
+                '</div>'
+                '<div style="line-height:1.38;font-size:11pt;color:#000;">Wishing our entire team a joyful and safe celebration.</div>'
+            ),
+            footer_bg_color="#FAFBFD",
+            is_default=True,
+        ))
         db.commit()
     finally:
         db.close()
