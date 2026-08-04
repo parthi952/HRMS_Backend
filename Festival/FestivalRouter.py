@@ -35,6 +35,7 @@ try:
             "ALTER TABLE wish_templates ADD COLUMN company_tagline VARCHAR;",
             "ALTER TABLE festival_wishes ADD COLUMN to_emails VARCHAR;",
             "ALTER TABLE commercial_emails ADD COLUMN to_emails VARCHAR;",
+            "ALTER TABLE festival_wishes ADD COLUMN send_time VARCHAR DEFAULT '09:00';",
             "ALTER TABLE email_provider_config ADD COLUMN batch_size INTEGER DEFAULT 30;",
             "ALTER TABLE email_provider_config ADD COLUMN delay_seconds INTEGER DEFAULT 0;",
         ]:
@@ -58,6 +59,7 @@ def _serialize(w: FestivalDB.FestivalWish):
         "id": w.id,
         "name": w.name,
         "date": w.date.isoformat(),
+        "send_time": w.send_time or "09:00",
         "message": w.message,
         "recurs_yearly": w.recurs_yearly,
         "enabled": w.enabled,
@@ -140,6 +142,7 @@ def create_wish(data: dict, current_user: User = Depends(get_current_user), db: 
     wish = FestivalDB.FestivalWish(
         name=data.get("name", "").strip() or "Festival",
         date=wish_date,
+        send_time=data.get("send_time", "09:00").strip() or "09:00",
         message=data.get("message", "").strip() or "Wishing you a happy celebration!",
         recurs_yearly=bool(data.get("recurs_yearly", True)),
         enabled=bool(data.get("enabled", True)),
@@ -169,6 +172,8 @@ def update_wish(wish_id: int, data: dict, current_user: User = Depends(get_curre
             wish.date = datetime.strptime(data["date"], "%Y-%m-%d").date()
         except ValueError:
             raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    if "send_time" in data:
+        wish.send_time = data["send_time"].strip() or "09:00"
     if "message" in data:
         wish.message = data["message"].strip() or wish.message
     if "recurs_yearly" in data:
@@ -529,26 +534,28 @@ async def send_now(wish_id: int, current_user: User = Depends(get_current_user),
 
 
 async def run_daily_festival_check():
-    """Called once a day by the scheduler. Safe to run from multiple worker
-    processes: the DB UPDATE only affects a row for the worker that gets
-    there first, so the email only goes out once per festival per year."""
+    """Called periodically by scheduler. Evaluates both festival date AND
+    scheduled send_time before triggering automatic wishes."""
     today = date.today()
+    now_time_str = datetime.now().strftime("%H:%M")
     db = SessionLocal()
     try:
         wishes = db.query(FestivalDB.FestivalWish).filter(FestivalDB.FestivalWish.enabled == True).all()
         for w in wishes:
             if not _is_today(w, today):
                 continue
-            claimed = db.query(FestivalDB.FestivalWish).filter(
-                FestivalDB.FestivalWish.id == w.id,
-                (FestivalDB.FestivalWish.last_email_sent_year.is_(None))
-                | (FestivalDB.FestivalWish.last_email_sent_year != today.year),
-            ).update({"last_email_sent_year": today.year}, synchronize_session=False)
-            db.commit()
-            if claimed:
-                ok, detail = await send_wish_email(w, db)
-                if not ok:
-                    print(f"[festival] email for '{w.name}' not sent: {detail}")
+            wish_time = (w.send_time or "09:00").strip()
+            if now_time_str >= wish_time:
+                claimed = db.query(FestivalDB.FestivalWish).filter(
+                    FestivalDB.FestivalWish.id == w.id,
+                    (FestivalDB.FestivalWish.last_email_sent_year.is_(None))
+                    | (FestivalDB.FestivalWish.last_email_sent_year != today.year),
+                ).update({"last_email_sent_year": today.year}, synchronize_session=False)
+                db.commit()
+                if claimed:
+                    ok, detail = await send_wish_email(w, db)
+                    if not ok:
+                        print(f"[festival] email for '{w.name}' not sent: {detail}")
     finally:
         db.close()
 

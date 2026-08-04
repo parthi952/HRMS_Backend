@@ -18,6 +18,7 @@ class FestivalWish(Base):
     cc_emails = Column(String, nullable=True)  # comma-separated
     from_email = Column(String, nullable=True)  # overrides GRAPH_SENDER_EMAIL if set
     template_id = Column(Integer, nullable=True)  # FK to wish_templates.id (nullable — falls back to the default template)
+    send_time = Column(String, default="09:00")  # HH:MM format e.g. "09:00"
 
 
 class WishTemplate(Base):
