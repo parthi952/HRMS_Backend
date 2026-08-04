@@ -86,9 +86,33 @@ def merge_message(message: str, name: str) -> str:
     )
 
 
+import re
+
+
+def _center_and_format_images(html_content: str) -> str:
+    if not html_content or "<img" not in html_content.lower():
+        return html_content or ""
+
+    def replace_img(match):
+        img_tag = match.group(0)
+        # Ensure display:block; margin:12px auto; max-width:100%; height:auto; border-radius:12px;
+        if 'style="' in img_tag:
+            img_tag = re.sub(
+                r'style="([^"]*)"',
+                r'style="\1;display:block;margin:12px auto;max-width:100%;height:auto;border-radius:12px;"',
+                img_tag
+            )
+        else:
+            img_tag = img_tag.replace('<img ', '<img style="display:block;margin:12px auto;max-width:100%;height:auto;border-radius:12px;" ')
+        return f'<div align="center" style="text-align:center;margin:12px 0;">{img_tag}</div>'
+
+    return re.sub(r'<img\s+[^>]*>', replace_img, html_content)
+
+
 def build_email_html(title: str, template, message: str) -> str:
+    formatted_message = _center_and_format_images(message)
     if not template:
-        return message
+        return formatted_message
     header = template.header_html.replace("{{festival_name}}", title).replace("{festival_name}", title)
     if template.logo_url:
         align_margin = {
@@ -120,7 +144,7 @@ def build_email_html(title: str, template, message: str) -> str:
   </tr>
   <tr>
     <td style="padding:26.25pt 26.25pt 11.25pt;">
-      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;">{message}</div>
+      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;text-align:center;">{formatted_message}</div>
     </td>
   </tr>{highlight_block}
   <tr><td style="background-color:#E8EDF4;height:0.75pt;">&nbsp;</td></tr>
