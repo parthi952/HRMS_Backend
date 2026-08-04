@@ -62,7 +62,20 @@ async def _send_via_microsoft(cfg, subject, html, to_email, cc_list, sender_over
             headers={"Authorization": f"Bearer {token}"},
             json=payload,
         )
-    return resp.status_code == 202, (None if resp.status_code == 202 else resp.text)
+    if resp.status_code == 202:
+        return True, None
+
+    err_text = resp.text
+    try:
+        err_json = resp.json()
+        code = err_json.get("error", {}).get("code")
+        msg = err_json.get("error", {}).get("message")
+        if code == "ErrorAccessDenied" or resp.status_code in (401, 403):
+            err_text = f"Microsoft Graph Access Denied ({code}): {msg}. Please check: 1) Grant Admin Consent for 'Mail.Send' in Azure AD App Registrations. 2) Ensure Sender Email '{sender}' is a valid M365 mailbox. 3) Use your M365 Tenant ID instead of 'common'."
+    except Exception:
+        pass
+
+    return False, err_text
 
 
 def _send_via_google_sync(cfg, subject, html, to_email, cc_list, sender_override=None):
