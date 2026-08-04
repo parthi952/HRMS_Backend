@@ -446,9 +446,9 @@ def get_wish_logs(wish_id: int, current_user: User = Depends(get_current_user), 
 
 
 async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
-    recipients = common.get_recipients(wish.audience, db)
+    recipients = common.get_recipients(wish.audience, db, wish.cc_emails or "")
     if not recipients:
-        return False, "No recipients found for this wish's audience"
+        return False, "No recipient emails found. Please add active employees in Employee Management, or add customer emails under Customer Contacts."
 
     template = common.get_template(wish.template_id, db)
     if not template:

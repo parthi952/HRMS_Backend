@@ -125,9 +125,9 @@ def get_email_logs(email_id: int, current_user: User = Depends(get_current_user)
 
 
 async def send_commercial_email(email: FestivalDB.CommercialEmail, db: Session):
-    recipients = common.get_recipients(email.audience, db)
+    recipients = common.get_recipients(email.audience, db, email.cc_emails or "")
     if not recipients:
-        return False, "No recipients found for this email's audience"
+        return False, "No recipient emails found. Please add active employees in Employee Management, or add customer emails under Customer Contacts below."
 
     template = common.get_template(email.template_id, db)
     if not template:

@@ -7,19 +7,52 @@ import module.FestivalDB as FestivalDB
 import module.EmplyeeDB as EmplyeeDB
 
 
-def get_recipients(audience: str, db: Session):
+def get_recipients(audience: str, db: Session, cc_emails_str: str = ""):
     audience = audience or "employees"
     recipients = []
+    seen = set()
+
     if audience in ("employees", "both"):
-        emp_rows = db.query(EmplyeeDB.Employee.name, EmplyeeDB.Employee.email).filter(
-            EmplyeeDB.Employee.Status == "Active", EmplyeeDB.Employee.email.isnot(None)
+        emp_rows = db.query(
+            EmplyeeDB.Employee.name,
+            EmplyeeDB.Employee.email,
+            EmplyeeDB.Employee.Status
+        ).filter(
+            EmplyeeDB.Employee.email.isnot(None),
+            EmplyeeDB.Employee.email != ""
         ).all()
-        recipients += [(name or "Team Member", email) for name, email in emp_rows if email]
+        for name, email, status in emp_rows:
+            if not email or not email.strip():
+                continue
+            clean_email = email.strip()
+            # Status check: include if Status is Active/active/null or not Explicitly Inactive/Terminated
+            status_str = (status or "Active").strip().lower()
+            if status_str not in ("inactive", "terminated", "resigned", "disabled") and clean_email.lower() not in seen:
+                seen.add(clean_email.lower())
+                recipients.append((name or "Team Member", clean_email))
+
     if audience in ("customers", "both"):
         cust_rows = db.query(FestivalDB.WishContact.name, FestivalDB.WishContact.email).filter(
-            FestivalDB.WishContact.enabled == True
+            FestivalDB.WishContact.enabled == True,
+            FestivalDB.WishContact.email.isnot(None),
+            FestivalDB.WishContact.email != ""
         ).all()
-        recipients += [(name or "Valued Customer", email) for name, email in cust_rows if email]
+        for name, email in cust_rows:
+            if not email or not email.strip():
+                continue
+            clean_email = email.strip()
+            if clean_email.lower() not in seen:
+                seen.add(clean_email.lower())
+                recipients.append((name or "Valued Customer", clean_email))
+
+    # Fallback to CC Emails if no recipients were found in DB tables
+    if not recipients and cc_emails_str:
+        cc_list = [c.strip() for c in cc_emails_str.split(",") if c.strip() and "@" in c]
+        for c_email in cc_list:
+            if c_email.lower() not in seen:
+                seen.add(c_email.lower())
+                recipients.append(("Valued Recipient", c_email))
+
     return recipients
 
 
