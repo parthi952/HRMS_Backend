@@ -28,6 +28,11 @@ try:
             "ALTER TABLE wish_templates ADD COLUMN logo_url VARCHAR;",
             "ALTER TABLE wish_templates ADD COLUMN logo_width INTEGER DEFAULT 120;",
             "ALTER TABLE wish_templates ADD COLUMN logo_align VARCHAR DEFAULT 'center';",
+            "ALTER TABLE wish_templates ADD COLUMN company_name VARCHAR;",
+            "ALTER TABLE wish_templates ADD COLUMN company_website VARCHAR;",
+            "ALTER TABLE wish_templates ADD COLUMN company_email VARCHAR;",
+            "ALTER TABLE wish_templates ADD COLUMN company_phone VARCHAR;",
+            "ALTER TABLE wish_templates ADD COLUMN company_tagline VARCHAR;",
         ]:
             try:
                 conn.execute(text(col))
@@ -63,6 +68,11 @@ def _serialize_template(t: FestivalDB.WishTemplate):
     return {
         "id": t.id,
         "name": t.name,
+        "company_name": t.company_name or "",
+        "company_website": t.company_website or "",
+        "company_email": t.company_email or "",
+        "company_phone": t.company_phone or "",
+        "company_tagline": t.company_tagline or "",
         "header_html": t.header_html,
         "header_bg_color": t.header_bg_color,
         "highlight_html": t.highlight_html or "",
@@ -204,6 +214,11 @@ def create_template(data: dict, current_user: User = Depends(get_current_user), 
         db.query(FestivalDB.WishTemplate).update({"is_default": False})
     template = FestivalDB.WishTemplate(
         name=data["name"].strip(),
+        company_name=data.get("company_name", "").strip() or None,
+        company_website=data.get("company_website", "").strip() or None,
+        company_email=data.get("company_email", "").strip() or None,
+        company_phone=data.get("company_phone", "").strip() or None,
+        company_tagline=data.get("company_tagline", "").strip() or None,
         header_html=data.get("header_html", "").strip() or "<div>{{festival_name}}</div>",
         header_bg_color=data.get("header_bg_color") or "#9EE4FF",
         highlight_html=data.get("highlight_html", "").strip() or None,
@@ -230,6 +245,16 @@ def update_template(template_id: int, data: dict, current_user: User = Depends(g
         raise HTTPException(status_code=404, detail="Not found")
     if "name" in data:
         template.name = data["name"].strip() or template.name
+    if "company_name" in data:
+        template.company_name = data["company_name"].strip() or None
+    if "company_website" in data:
+        template.company_website = data["company_website"].strip() or None
+    if "company_email" in data:
+        template.company_email = data["company_email"].strip() or None
+    if "company_phone" in data:
+        template.company_phone = data["company_phone"].strip() or None
+    if "company_tagline" in data:
+        template.company_tagline = data["company_tagline"].strip() or None
     if "header_html" in data:
         template.header_html = data["header_html"]
     if "header_bg_color" in data:

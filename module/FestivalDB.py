@@ -24,6 +24,11 @@ class WishTemplate(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    company_name = Column(String, nullable=True)
+    company_website = Column(String, nullable=True)
+    company_email = Column(String, nullable=True)
+    company_phone = Column(String, nullable=True)
+    company_tagline = Column(String, nullable=True)
     header_html = Column(Text, nullable=False)      # supports {{festival_name}}
     header_bg_color = Column(String, default="#9EE4FF")
     highlight_html = Column(Text, nullable=True)     # the "from us" callout box
@@ -34,6 +39,7 @@ class WishTemplate(Base):
     logo_url = Column(String, nullable=True)
     logo_width = Column(Integer, default=120)   # px
     logo_align = Column(String, default="center")  # "left" | "center" | "right"
+
 
 
 class WishContact(Base):
