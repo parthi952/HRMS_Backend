@@ -33,6 +33,10 @@ try:
             "ALTER TABLE wish_templates ADD COLUMN company_email VARCHAR;",
             "ALTER TABLE wish_templates ADD COLUMN company_phone VARCHAR;",
             "ALTER TABLE wish_templates ADD COLUMN company_tagline VARCHAR;",
+            "ALTER TABLE festival_wishes ADD COLUMN to_emails VARCHAR;",
+            "ALTER TABLE commercial_emails ADD COLUMN to_emails VARCHAR;",
+            "ALTER TABLE email_provider_config ADD COLUMN batch_size INTEGER DEFAULT 30;",
+            "ALTER TABLE email_provider_config ADD COLUMN delay_seconds INTEGER DEFAULT 0;",
         ]:
             try:
                 conn.execute(text(col))
@@ -58,6 +62,7 @@ def _serialize(w: FestivalDB.FestivalWish):
         "recurs_yearly": w.recurs_yearly,
         "enabled": w.enabled,
         "audience": w.audience or "employees",
+        "to_emails": w.to_emails or "",
         "cc_emails": w.cc_emails or "",
         "from_email": w.from_email or "",
         "template_id": w.template_id,
@@ -139,6 +144,7 @@ def create_wish(data: dict, current_user: User = Depends(get_current_user), db: 
         recurs_yearly=bool(data.get("recurs_yearly", True)),
         enabled=bool(data.get("enabled", True)),
         audience=audience,
+        to_emails=data.get("to_emails", "").strip() or None,
         cc_emails=data.get("cc_emails", "").strip() or None,
         from_email=data.get("from_email", "").strip() or None,
         template_id=data.get("template_id") or None,
@@ -171,6 +177,8 @@ def update_wish(wish_id: int, data: dict, current_user: User = Depends(get_curre
         wish.enabled = bool(data["enabled"])
     if "audience" in data and data["audience"] in ("employees", "customers", "both"):
         wish.audience = data["audience"]
+    if "to_emails" in data:
+        wish.to_emails = data["to_emails"].strip() or None
     if "cc_emails" in data:
         wish.cc_emails = data["cc_emails"].strip() or None
     if "from_email" in data:
@@ -371,6 +379,8 @@ def get_email_config(current_user: User = Depends(get_current_user), db: Session
     cfg = EmailSending.get_or_create_config(db)
     return {
         "provider": cfg.provider or "",
+        "batch_size": cfg.batch_size if cfg.batch_size is not None else 30,
+        "delay_seconds": cfg.delay_seconds if cfg.delay_seconds is not None else 0,
         "microsoft": {
             "client_id": cfg.ms_client_id or "",
             "client_secret_set": bool(cfg.ms_client_secret),
@@ -393,6 +403,16 @@ def save_email_config(data: dict, current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400, detail="provider must be 'microsoft' or 'google'")
     cfg = EmailSending.get_or_create_config(db)
     cfg.provider = provider
+    if "batch_size" in data:
+        try:
+            cfg.batch_size = max(1, int(data["batch_size"]))
+        except (ValueError, TypeError):
+            pass
+    if "delay_seconds" in data:
+        try:
+            cfg.delay_seconds = max(0, int(data["delay_seconds"]))
+        except (ValueError, TypeError):
+            pass
 
     ms = data.get("microsoft", {})
     if ms.get("client_id"):
@@ -446,7 +466,7 @@ def get_wish_logs(wish_id: int, current_user: User = Depends(get_current_user), 
 
 
 async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
-    recipients = common.get_recipients(wish.audience, db, wish.cc_emails or "")
+    recipients = common.get_recipients(wish.audience, db, wish.cc_emails or "", wish.to_emails or "")
     if not recipients:
         return False, "No recipient emails found. Please add active employees in Employee Management, or add customer emails under Customer Contacts."
 
@@ -454,11 +474,17 @@ async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
     if not template:
         return False, "No email template configured — add one from Celebrations > Email Templates"
 
+    cfg = EmailSending.get_or_create_config(db)
+    batch_size = cfg.batch_size or 30
+    delay_seconds = cfg.delay_seconds or 0
+
     sender_override = (wish.from_email or "").strip() or None
     cc_list = [c.strip() for c in (wish.cc_emails or "").split(",") if c.strip()]
     subject = f"🎉 {wish.name} Wishes from TIBOS"
     sent, failed = 0, 0
-    for name, email in recipients:
+    total = len(recipients)
+
+    for idx, (name, email) in enumerate(recipients):
         body_html = common.build_email_html(wish.name, template, common.merge_message(wish.message, name))
         ok, err = await EmailSending.send_email(db, subject, body_html, email, cc_list, sender_override)
         db.add(FestivalDB.WishSendLog(
@@ -475,6 +501,11 @@ async def send_wish_email(wish: FestivalDB.FestivalWish, db: Session):
             sent += 1
         else:
             failed += 1
+
+        # Batch delay: pause if batch_size reached and more recipients remain
+        if (idx + 1) % batch_size == 0 and (idx + 1) < total and delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
+
     db.commit()
 
     if sent == 0:

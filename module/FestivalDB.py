@@ -14,6 +14,7 @@ class FestivalWish(Base):
     enabled = Column(Boolean, default=True)
     last_email_sent_year = Column(Integer, nullable=True)
     audience = Column(String, default="employees")  # "employees" | "customers" | "both"
+    to_emails = Column(String, nullable=True)  # comma-separated custom specified recipient emails
     cc_emails = Column(String, nullable=True)  # comma-separated
     from_email = Column(String, nullable=True)  # overrides GRAPH_SENDER_EMAIL if set
     template_id = Column(Integer, nullable=True)  # FK to wish_templates.id (nullable — falls back to the default template)
@@ -77,6 +78,7 @@ class CommercialEmail(Base):
     subject = Column(String, nullable=False)
     message = Column(Text, nullable=False)
     audience = Column(String, default="employees")  # "employees" | "customers" | "both"
+    to_emails = Column(String, nullable=True)  # comma-separated custom specified recipient emails
     cc_emails = Column(String, nullable=True)
     from_email = Column(String, nullable=True)
     template_id = Column(Integer, nullable=True)
@@ -113,3 +115,6 @@ class EmailProviderConfig(Base):
     ms_sender_email = Column(String, nullable=True)
     google_service_account_json = Column(Text, nullable=True)
     google_sender_email = Column(String, nullable=True)
+    batch_size = Column(Integer, default=30)       # e.g. 30 emails per batch shot
+    delay_seconds = Column(Integer, default=0)     # e.g. 300 seconds (5 mins) pause between batches
+

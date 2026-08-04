@@ -7,10 +7,20 @@ import module.FestivalDB as FestivalDB
 import module.EmplyeeDB as EmplyeeDB
 
 
-def get_recipients(audience: str, db: Session, cc_emails_str: str = ""):
+def get_recipients(audience: str, db: Session, cc_emails_str: str = "", to_emails_str: str = ""):
     audience = audience or "employees"
     recipients = []
     seen = set()
+
+    # 1. If explicit recipient email(s) are specified in the Recipient Box, send ONLY to those!
+    if to_emails_str and to_emails_str.strip():
+        for item in to_emails_str.split(","):
+            item = item.strip()
+            if item and "@" in item and item.lower() not in seen:
+                seen.add(item.lower())
+                recipients.append(("Valued Recipient", item))
+        if recipients:
+            return recipients
 
     if audience in ("employees", "both"):
         emp_rows = db.query(
