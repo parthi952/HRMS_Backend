@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     seed_default_festivals()
     seed_default_template()
 
-    scheduler.add_job(_festival_job, "cron", hour=8, minute=30, id="festival_check", replace_existing=True)
+    scheduler.add_job(_festival_job, "interval", minutes=5, id="festival_check", replace_existing=True)
     scheduler.start()
 
     yield
