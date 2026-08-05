@@ -1,6 +1,8 @@
 import uuid
 from datetime import date, datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
+import io
+import csv
 from sqlalchemy.orm import Session
 
 from database import get_db, SessionLocal
@@ -38,6 +40,7 @@ try:
             "ALTER TABLE festival_wishes ADD COLUMN send_time VARCHAR DEFAULT '09:00';",
             "ALTER TABLE email_provider_config ADD COLUMN batch_size INTEGER DEFAULT 30;",
             "ALTER TABLE email_provider_config ADD COLUMN delay_seconds INTEGER DEFAULT 0;",
+            "ALTER TABLE wish_contacts ADD COLUMN company_name VARCHAR;",
         ]:
             try:
                 conn.execute(text(col))
@@ -107,7 +110,13 @@ def _serialize_log(log: FestivalDB.WishSendLog):
 
 
 def _serialize_contact(c: FestivalDB.WishContact):
-    return {"id": c.id, "name": c.name, "email": c.email, "enabled": c.enabled}
+    return {
+        "id": c.id,
+        "name": c.name,
+        "email": c.email,
+        "company_name": c.company_name or "",
+        "enabled": c.enabled,
+    }
 
 
 @router.get("/today")
@@ -327,9 +336,15 @@ def create_contact(data: dict, current_user: User = Depends(get_current_user), d
         raise HTTPException(status_code=403, detail="Admin only")
     name = data.get("name", "").strip()
     email = data.get("email", "").strip()
+    company_name = data.get("company_name", "").strip() or None
     if not name or not email:
         raise HTTPException(status_code=400, detail="name and email are required")
-    contact = FestivalDB.WishContact(name=name, email=email, enabled=bool(data.get("enabled", True)))
+    contact = FestivalDB.WishContact(
+        name=name,
+        email=email,
+        company_name=company_name,
+        enabled=bool(data.get("enabled", True))
+    )
     db.add(contact)
     db.commit()
     db.refresh(contact)
@@ -347,6 +362,8 @@ def update_contact(contact_id: int, data: dict, current_user: User = Depends(get
         contact.name = data["name"].strip() or contact.name
     if "email" in data:
         contact.email = data["email"].strip() or contact.email
+    if "company_name" in data:
+        contact.company_name = data["company_name"].strip() or None
     if "enabled" in data:
         contact.enabled = bool(data["enabled"])
     db.commit()
@@ -364,6 +381,101 @@ def delete_contact(contact_id: int, current_user: User = Depends(get_current_use
     db.delete(contact)
     db.commit()
     return {"message": "Deleted"}
+
+
+@router.get("/contacts/sample-excel")
+def download_sample_excel():
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Company Name", "Customer Name", "Customer Email"])
+    writer.writerow(["TIBOS Solutions", "John Doe", "john@tibos.in"])
+    writer.writerow(["Acme Corporation", "Jane Smith", "jane@acme.com"])
+    content = output.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="customer_contacts_sample.csv"'}
+    )
+
+
+@router.post("/contacts/bulk-upload")
+async def bulk_upload_contacts(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    filename = (file.filename or "").lower()
+    content = await file.read()
+
+    rows = []
+    if filename.endswith(".csv") or filename.endswith(".txt"):
+        text_data = content.decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(io.StringIO(text_data))
+        for r in reader:
+            rows.append(r)
+    elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+            sheet = wb.active
+            headers = [str(cell.value or "").strip() for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                row_dict = {}
+                for h, val in zip(headers, row):
+                    if h:
+                        row_dict[h] = str(val or "").strip()
+                rows.append(row_dict)
+        except Exception:
+            text_data = content.decode("utf-8-sig", errors="ignore")
+            reader = csv.DictReader(io.StringIO(text_data))
+            for r in reader:
+                rows.append(r)
+    else:
+        raise HTTPException(status_code=400, detail="Only .xlsx, .xls, or .csv files are supported")
+
+    added_count = 0
+    updated_count = 0
+    skipped_count = 0
+
+    for r in rows:
+        norm_r = {str(k).strip().lower().replace(" ", "_"): str(v or "").strip() for k, v in r.items() if k}
+        company_name = norm_r.get("company_name") or norm_r.get("company") or norm_r.get("organization") or None
+        name = norm_r.get("customer_name") or norm_r.get("name") or norm_r.get("client_name") or ""
+        email = norm_r.get("customer_email") or norm_r.get("email") or norm_r.get("email_id") or norm_r.get("mail") or ""
+
+        if not email or "@" not in email:
+            skipped_count += 1
+            continue
+
+        if not name:
+            name = email.split("@")[0].capitalize()
+
+        existing = db.query(FestivalDB.WishContact).filter(FestivalDB.WishContact.email == email).first()
+        if existing:
+            existing.name = name
+            existing.company_name = company_name or existing.company_name
+            existing.enabled = True
+            updated_count += 1
+        else:
+            new_contact = FestivalDB.WishContact(
+                name=name,
+                email=email,
+                company_name=company_name,
+                enabled=True
+            )
+            db.add(new_contact)
+            added_count += 1
+
+    db.commit()
+    return {
+        "message": f"Bulk upload completed: {added_count} contacts added, {updated_count} updated.",
+        "added": added_count,
+        "updated": updated_count,
+        "skipped": skipped_count
+    }
 
 
 @router.post("/upload-image")
