@@ -478,6 +478,85 @@ async def bulk_upload_contacts(
     }
 
 
+@router.get("/all-send-history")
+def get_all_send_history(
+    status: str = None,
+    campaign_type: str = None,
+    search: str = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    f_logs = db.query(FestivalDB.WishSendLog).order_by(FestivalDB.WishSendLog.sent_at.desc()).limit(1000).all()
+    c_logs = db.query(FestivalDB.CommercialSendLog).order_by(FestivalDB.CommercialSendLog.sent_at.desc()).limit(1000).all()
+
+    combined = []
+    for l in f_logs:
+        combined.append({
+            "id": f"f_{l.id}",
+            "campaign_type": "Festival Wish",
+            "campaign_name": l.wish_name or "Festival Wish",
+            "recipient_name": l.recipient_name or "",
+            "to_email": l.to_email,
+            "from_email": l.from_email or "",
+            "cc_emails": l.cc_emails or "",
+            "status": l.status,
+            "error": l.error or None,
+            "sent_at": l.sent_at.isoformat() if l.sent_at else "",
+        })
+
+    for l in c_logs:
+        combined.append({
+            "id": f"c_{l.id}",
+            "campaign_type": "Commercial Email",
+            "campaign_name": l.email_name or "Commercial Email",
+            "recipient_name": l.recipient_name or "",
+            "to_email": l.to_email,
+            "from_email": l.from_email or "",
+            "cc_emails": l.cc_emails or "",
+            "status": l.status,
+            "error": l.error or None,
+            "sent_at": l.sent_at.isoformat() if l.sent_at else "",
+        })
+
+    combined.sort(key=lambda x: x["sent_at"] or "", reverse=True)
+
+    if search and search.strip():
+        q = search.strip().lower()
+        combined = [
+            x for x in combined
+            if q in x["to_email"].lower()
+            or q in x["recipient_name"].lower()
+            or q in x["campaign_name"].lower()
+            or q in (x["error"] or "").lower()
+        ]
+
+    if status and status.strip() and status != "all":
+        st = status.strip().lower()
+        combined = [x for x in combined if x["status"] == st]
+
+    if campaign_type and campaign_type.strip() and campaign_type != "all":
+        ct = campaign_type.strip().lower()
+        combined = [x for x in combined if ct in x["campaign_type"].lower()]
+
+    total_triggered = len(combined)
+    delivered_count = sum(1 for x in combined if x["status"] == "sent")
+    failed_count = sum(1 for x in combined if x["status"] == "failed")
+    success_rate = round((delivered_count / total_triggered * 100)) if total_triggered > 0 else 100
+
+    return {
+        "summary": {
+            "total": total_triggered,
+            "delivered": delivered_count,
+            "failed": failed_count,
+            "success_rate": success_rate,
+        },
+        "logs": combined
+    }
+
+
 @router.post("/upload-image")
 def upload_wish_image(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
