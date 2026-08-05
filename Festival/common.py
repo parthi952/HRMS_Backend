@@ -12,16 +12,7 @@ def get_recipients(audience: str, db: Session, cc_emails_str: str = "", to_email
     recipients = []
     seen = set()
 
-    # 1. If explicit recipient email(s) are specified in the Recipient Box, send ONLY to those!
-    if to_emails_str and to_emails_str.strip():
-        for item in to_emails_str.split(","):
-            item = item.strip()
-            if item and "@" in item and item.lower() not in seen:
-                seen.add(item.lower())
-                recipients.append(("Valued Recipient", item))
-        if recipients:
-            return recipients
-
+    # 1. Fetch audience recipients (Employees / Customers / Both)
     if audience in ("employees", "both"):
         emp_rows = db.query(
             EmplyeeDB.Employee.name,
@@ -55,7 +46,15 @@ def get_recipients(audience: str, db: Session, cc_emails_str: str = "", to_email
                 seen.add(clean_email.lower())
                 recipients.append((name or "Valued Customer", clean_email))
 
-    # Fallback to CC Emails if no recipients were found in DB tables
+    # 2. ALSO include any specific additional recipient emails provided in the "Specific Recipients" box!
+    if to_emails_str and to_emails_str.strip():
+        for item in to_emails_str.split(","):
+            item = item.strip()
+            if item and "@" in item and item.lower() not in seen:
+                seen.add(item.lower())
+                recipients.append(("Valued Recipient", item))
+
+    # 3. Fallback to CC Emails if no recipients were found in DB tables or specific box
     if not recipients and cc_emails_str:
         cc_list = [c.strip() for c in cc_emails_str.split(",") if c.strip() and "@" in c]
         for c_email in cc_list:
