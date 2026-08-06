@@ -51,7 +51,9 @@ class WishContact(Base):
     name = Column(String, nullable=False)
     email = Column(String, nullable=False)
     company_name = Column(String, nullable=True)
+    contact_type = Column(String, default="customer")  # "customer" | "employee" | "both"
     enabled = Column(Boolean, default=True)
+
 
 
 class WishSendLog(Base):

@@ -41,6 +41,7 @@ try:
             "ALTER TABLE email_provider_config ADD COLUMN batch_size INTEGER DEFAULT 30;",
             "ALTER TABLE email_provider_config ADD COLUMN delay_seconds INTEGER DEFAULT 0;",
             "ALTER TABLE wish_contacts ADD COLUMN company_name VARCHAR;",
+            "ALTER TABLE wish_contacts ADD COLUMN contact_type VARCHAR DEFAULT 'customer';",
         ]:
             try:
                 conn.execute(text(col))
@@ -115,6 +116,7 @@ def _serialize_contact(c: FestivalDB.WishContact):
         "name": c.name,
         "email": c.email,
         "company_name": c.company_name or "",
+        "contact_type": c.contact_type or "customer",
         "enabled": c.enabled,
     }
 
@@ -337,12 +339,16 @@ def create_contact(data: dict, current_user: User = Depends(get_current_user), d
     name = data.get("name", "").strip()
     email = data.get("email", "").strip()
     company_name = data.get("company_name", "").strip() or None
+    contact_type = data.get("contact_type", "customer").strip().lower()
+    if contact_type not in ("customer", "employee", "both"):
+        contact_type = "customer"
     if not name or not email:
         raise HTTPException(status_code=400, detail="name and email are required")
     contact = FestivalDB.WishContact(
         name=name,
         email=email,
         company_name=company_name,
+        contact_type=contact_type,
         enabled=bool(data.get("enabled", True))
     )
     db.add(contact)
@@ -364,6 +370,10 @@ def update_contact(contact_id: int, data: dict, current_user: User = Depends(get
         contact.email = data["email"].strip() or contact.email
     if "company_name" in data:
         contact.company_name = data["company_name"].strip() or None
+    if "contact_type" in data:
+        ctype = str(data["contact_type"]).strip().lower()
+        if ctype in ("customer", "employee", "both"):
+            contact.contact_type = ctype
     if "enabled" in data:
         contact.enabled = bool(data["enabled"])
     db.commit()
@@ -387,14 +397,15 @@ def delete_contact(contact_id: int, current_user: User = Depends(get_current_use
 def download_sample_excel():
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Company Name", "Customer Name", "Customer Email"])
-    writer.writerow(["TIBOS Solutions", "John Doe", "john@tibos.in"])
-    writer.writerow(["Acme Corporation", "Jane Smith", "jane@acme.com"])
+    writer.writerow(["Company Name", "Contact Name", "Contact Email", "Contact Type"])
+    writer.writerow(["TIBOS Solutions", "John Doe", "john@tibos.in", "customer"])
+    writer.writerow(["Acme Corporation", "Jane Smith", "jane@acme.com", "employee"])
+    writer.writerow(["Global Tech", "Alex Lee", "alex@global.com", "both"])
     content = output.getvalue()
     return Response(
         content=content,
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="customer_contacts_sample.csv"'}
+        headers={"Content-Disposition": 'attachment; filename="audience_contacts_sample.csv"'}
     )
 
 
@@ -443,8 +454,12 @@ async def bulk_upload_contacts(
     for r in rows:
         norm_r = {str(k).strip().lower().replace(" ", "_"): str(v or "").strip() for k, v in r.items() if k}
         company_name = norm_r.get("company_name") or norm_r.get("company") or norm_r.get("organization") or None
-        name = norm_r.get("customer_name") or norm_r.get("name") or norm_r.get("client_name") or ""
-        email = norm_r.get("customer_email") or norm_r.get("email") or norm_r.get("email_id") or norm_r.get("mail") or ""
+        name = norm_r.get("contact_name") or norm_r.get("customer_name") or norm_r.get("name") or norm_r.get("client_name") or ""
+        email = norm_r.get("contact_email") or norm_r.get("customer_email") or norm_r.get("email") or norm_r.get("email_id") or norm_r.get("mail") or ""
+        contact_type = norm_r.get("contact_type") or norm_r.get("audience_type") or norm_r.get("audience") or norm_r.get("type") or "customer"
+        contact_type = contact_type.strip().lower()
+        if contact_type not in ("customer", "employee", "both"):
+            contact_type = "customer"
 
         if not email or "@" not in email:
             skipped_count += 1
@@ -457,6 +472,7 @@ async def bulk_upload_contacts(
         if existing:
             existing.name = name
             existing.company_name = company_name or existing.company_name
+            existing.contact_type = contact_type or existing.contact_type or "customer"
             existing.enabled = True
             updated_count += 1
         else:
@@ -464,6 +480,7 @@ async def bulk_upload_contacts(
                 name=name,
                 email=email,
                 company_name=company_name,
+                contact_type=contact_type,
                 enabled=True
             )
             db.add(new_contact)
@@ -554,6 +571,60 @@ def get_all_send_history(
             "success_rate": success_rate,
         },
         "logs": combined
+    }
+
+
+@router.get("/delivery-dashboard-stats")
+def get_delivery_dashboard_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from sqlalchemy import or_
+    import module.EmplyeeDB as EmplyeeDB
+
+    f_logs = db.query(FestivalDB.WishSendLog).order_by(FestivalDB.WishSendLog.sent_at.desc()).limit(1000).all()
+    c_logs = db.query(FestivalDB.CommercialSendLog).order_by(FestivalDB.CommercialSendLog.sent_at.desc()).limit(1000).all()
+
+    total_triggered = len(f_logs) + len(c_logs)
+    delivered_f = sum(1 for l in f_logs if l.status == "sent")
+    delivered_c = sum(1 for l in c_logs if l.status == "sent")
+    total_delivered = delivered_f + delivered_c
+    failed_f = sum(1 for l in f_logs if l.status == "failed")
+    failed_c = sum(1 for l in c_logs if l.status == "failed")
+    total_failed = failed_f + failed_c
+
+    success_rate = round((total_delivered / total_triggered * 100)) if total_triggered > 0 else 100
+
+    total_contacts = db.query(FestivalDB.WishContact).count()
+    emp_contacts = db.query(FestivalDB.WishContact).filter(FestivalDB.WishContact.contact_type == "employee").count()
+    cust_contacts = db.query(FestivalDB.WishContact).filter(
+        or_(FestivalDB.WishContact.contact_type == "customer", FestivalDB.WishContact.contact_type.is_(None))
+    ).count()
+    both_contacts = db.query(FestivalDB.WishContact).filter(FestivalDB.WishContact.contact_type == "both").count()
+
+    active_employees = db.query(EmplyeeDB.Employee).filter(
+        EmplyeeDB.Employee.email.isnot(None),
+        EmplyeeDB.Employee.email != ""
+    ).count()
+
+    return {
+        "summary": {
+            "total": total_triggered,
+            "delivered": total_delivered,
+            "failed": total_failed,
+            "success_rate": success_rate,
+        },
+        "campaign_breakdown": {
+            "festival_wishes": {"total": len(f_logs), "delivered": delivered_f, "failed": failed_f},
+            "commercial_emails": {"total": len(c_logs), "delivered": delivered_c, "failed": failed_c},
+        },
+        "audience_stats": {
+            "system_employees": active_employees,
+            "customer_contacts": cust_contacts,
+            "employee_contacts": emp_contacts,
+            "both_contacts": both_contacts,
+            "total_custom_contacts": total_contacts,
+        }
     }
 
 

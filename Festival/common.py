@@ -32,11 +32,31 @@ def get_recipients(audience: str, db: Session, cc_emails_str: str = "", to_email
                 seen.add(clean_email.lower())
                 recipients.append((name or "Team Member", clean_email))
 
+        # Also include manual contacts tagged for employee audience ("employee" or "both")
+        emp_contact_rows = db.query(FestivalDB.WishContact.name, FestivalDB.WishContact.email).filter(
+            FestivalDB.WishContact.enabled == True,
+            FestivalDB.WishContact.email.isnot(None),
+            FestivalDB.WishContact.email != "",
+            FestivalDB.WishContact.contact_type.in_(["employee", "both"])
+        ).all()
+        for name, email in emp_contact_rows:
+            if not email or not email.strip():
+                continue
+            clean_email = email.strip()
+            if clean_email.lower() not in seen:
+                seen.add(clean_email.lower())
+                recipients.append((name or "Team Member", clean_email))
+
     if audience in ("customers", "both"):
+        from sqlalchemy import or_
         cust_rows = db.query(FestivalDB.WishContact.name, FestivalDB.WishContact.email).filter(
             FestivalDB.WishContact.enabled == True,
             FestivalDB.WishContact.email.isnot(None),
-            FestivalDB.WishContact.email != ""
+            FestivalDB.WishContact.email != "",
+            or_(
+                FestivalDB.WishContact.contact_type.in_(["customer", "both"]),
+                FestivalDB.WishContact.contact_type.is_(None)
+            )
         ).all()
         for name, email in cust_rows:
             if not email or not email.strip():

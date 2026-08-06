@@ -7,9 +7,13 @@ from Schemas.PosterSchemas import AiGenerationRequestSchema
 
 dotenv.load_dotenv()
 
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
-)
+client = None
+api_key = os.getenv("GEMINI_API_KEY")
+if api_key:
+    try:
+        client = genai.Client(api_key=api_key)
+    except Exception as exc:
+        print(f"[ContentGenarete] Gemini client initialization failed: {exc}")
 
 def generate_job_post_content(request_data: AiGenerationRequestSchema) -> dict:
     job_details = request_data.JobDetails.model_dump()
@@ -95,15 +99,42 @@ ATS_JSON:
 ```
 """
 
-    response = client.models.generate_content(
-        model=os.getenv("MODEL"),
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(
-                thinking_level="HIGH"
+    if not client:
+        return {
+            "linkedin_post": f"AI generation is unavailable because GEMINI_API_KEY is not configured.\n\n{prompt}",
+            "ats_requirements": {
+                "technical_skills": [],
+                "soft_skills": [],
+                "education": [],
+                "experience": [],
+                "abilities": [],
+                "keywords": []
+            }
+        }
+
+    try:
+        response = client.models.generate_content(
+            model=os.getenv("MODEL"),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="HIGH"
+                )
             )
         )
-    )
+    except Exception as exc:
+        print(f"[ContentGenarete] Gemini generation failed: {exc}")
+        return {
+            "linkedin_post": f"AI generation failed: {exc}",
+            "ats_requirements": {
+                "technical_skills": [],
+                "soft_skills": [],
+                "education": [],
+                "experience": [],
+                "abilities": [],
+                "keywords": []
+            }
+        }
 
     response_text = response.text
 
