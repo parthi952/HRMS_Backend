@@ -393,6 +393,49 @@ def delete_contact(contact_id: int, current_user: User = Depends(get_current_use
     return {"message": "Deleted"}
 
 
+@router.post("/contacts/sync-employees")
+def sync_employees_from_sso(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Pull SSO-synced login accounts from the users table into the audience
+    contact list, tagged as 'employee'. Idempotent: emails that already exist
+    as contacts (enabled or disabled) are skipped, so a disabled contact is
+    never re-added."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    existing = {
+        c.email.strip().lower()
+        for c in db.query(FestivalDB.WishContact.email).all()
+        if c.email and c.email.strip()
+    }
+
+    users = db.query(User).filter(User.email.isnot(None), User.email != "").all()
+    added = 0
+    for u in users:
+        email = (u.email or "").strip()
+        if not email or "@" not in email:
+            continue
+        if email.lower() in existing:
+            continue
+        name = ((getattr(u, "username", None) or "").strip()) or email.split("@")[0]
+        db.add(FestivalDB.WishContact(
+            name=name,
+            email=email,
+            company_name=None,
+            contact_type="employee",
+            enabled=True,
+        ))
+        existing.add(email.lower())
+        added += 1
+
+    db.commit()
+    return {
+        "message": f"Synced {added} new employee contact(s) from SSO users."
+        if added else "All SSO employees are already in the contact list.",
+        "added": added,
+        "total_users": len(users),
+    }
+
+
 @router.get("/contacts/sample-excel")
 def download_sample_excel():
     output = io.StringIO()
