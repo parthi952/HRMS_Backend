@@ -260,6 +260,104 @@ def _finish_sso(email: str):
         db.close()
 
 
+def _as_int(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _ensure_department(db: Session, name: str):
+    """Employees.Department is a FK onto departments.Dep_name, so a directory
+    department has to exist as a row before it can be assigned. Returns the
+    stored name (matched case-insensitively) or None."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    import module.DepartmentDB as DepartmentDB
+    from sqlalchemy import func as sa_func
+    dep = db.query(DepartmentDB.Department).filter(
+        sa_func.lower(DepartmentDB.Department.Dep_name) == name.lower()
+    ).first()
+    if dep:
+        return dep.Dep_name
+    from Caluclation.IdCustom import generate_next_dep_id
+    dep = DepartmentDB.Department(Dep_id=generate_next_dep_id(db), Dep_name=name)
+    db.add(dep)
+    db.flush()
+    return dep.Dep_name
+
+
+def _upsert_employee_from_directory(db: Session, user: User, attrs: dict):
+    """Copy directory attributes onto the person's employee profile.
+
+    Existing values entered by HR always win — only blank fields are filled —
+    so running the sync repeatedly never overwrites curated data.
+    Returns "created", "updated" or "unchanged".
+    """
+    import module.EmplyeeDB as EmplyeeDB
+    from sqlalchemy import func as sa_func
+
+    email = (user.email or "").strip()
+    if not email:
+        return "unchanged"
+
+    emp = db.query(EmplyeeDB.Employee).filter(
+        sa_func.lower(EmplyeeDB.Employee.email) == email.lower()
+    ).first()
+
+    department = _ensure_department(db, attrs.get("department"))
+    outcome = "unchanged"
+
+    if not emp:
+        from Caluclation.IdCustom import generate_next_empid
+        emp = EmplyeeDB.Employee(
+            Emp_id=generate_next_empid(db),
+            email=email,
+            name=attrs.get("name") or email.split("@")[0],
+            f_name=attrs.get("first_name"),
+            l_name=attrs.get("last_name"),
+            phone=attrs.get("phone"),
+            designation=attrs.get("job_title"),
+            Department=department,
+            Status="Active" if attrs.get("active", True) else "Inactive",
+            Street=attrs.get("street"),
+            City=attrs.get("city"),
+            State=attrs.get("state"),
+            Pin_Code=_as_int(attrs.get("postal_code")),
+        )
+        db.add(emp)
+        db.flush()
+        outcome = "created"
+    else:
+        fillable = {
+            "name": attrs.get("name"),
+            "f_name": attrs.get("first_name"),
+            "l_name": attrs.get("last_name"),
+            "phone": attrs.get("phone"),
+            "designation": attrs.get("job_title"),
+            "Department": department,
+            "Street": attrs.get("street"),
+            "City": attrs.get("city"),
+            "State": attrs.get("state"),
+        }
+        for field, value in fillable.items():
+            if value and not (getattr(emp, field, None) or "").strip():
+                setattr(emp, field, value)
+                outcome = "updated"
+        if emp.Pin_Code is None and _as_int(attrs.get("postal_code")) is not None:
+            emp.Pin_Code = _as_int(attrs.get("postal_code"))
+            outcome = "updated"
+
+    # Link the login so "My Profile" resolves without waiting for the next sign-in
+    if not user.emp_id:
+        user.emp_id = emp.Emp_id
+        if outcome == "unchanged":
+            outcome = "updated"
+
+    return outcome
+
+
 @router.post("/sync")
 async def sso_sync_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.role != "admin":
@@ -288,7 +386,10 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
                     errors.append({"provider": "microsoft", "error": tokens.get("error_description", "Failed to get app token. Ensure 'User.Read.All' application permission is granted.")})
                 else:
                     users_resp = await client.get(
-                        "https://graph.microsoft.com/v1.0/users?$select=displayName,mail,userPrincipalName,jobTitle,department&$top=999",
+                        "https://graph.microsoft.com/v1.0/users"
+                        "?$select=displayName,givenName,surname,mail,userPrincipalName,jobTitle,"
+                        "department,mobilePhone,businessPhones,officeLocation,city,state,"
+                        "streetAddress,postalCode,accountEnabled&$top=999",
                         headers={"Authorization": f"Bearer {tokens['access_token']}"},
                     )
                     users_data = users_resp.json()
@@ -296,28 +397,41 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
                         email = (u.get("mail") or u.get("userPrincipalName") or "").lower().strip()
                         if not email:
                             continue
+                        business_phones = u.get("businessPhones") or []
+                        attrs = {
+                            "name": u.get("displayName"),
+                            "first_name": u.get("givenName"),
+                            "last_name": u.get("surname"),
+                            "job_title": u.get("jobTitle"),
+                            "department": u.get("department"),
+                            "phone": u.get("mobilePhone") or (business_phones[0] if business_phones else None),
+                            "street": u.get("streetAddress") or u.get("officeLocation"),
+                            "city": u.get("city"),
+                            "state": u.get("state"),
+                            "postal_code": u.get("postalCode"),
+                            "active": u.get("accountEnabled", True),
+                        }
                         existing = db.query(User).filter(User.email == email).first()
                         if not existing:
                             from Auth.Encrypt import hash_password
-                            new_user = User(
+                            existing = User(
                                 email=email,
                                 password=hash_password(secrets.token_urlsafe(16)),
                                 role="employee",
                             )
-                            db.add(new_user)
-                            synced.append({
-                                "email": email,
-                                "name": u.get("displayName", ""),
-                                "provider": "microsoft",
-                                "status": "created",
-                            })
+                            db.add(existing)
+                            db.flush()
+                            status_label = "created"
                         else:
-                            synced.append({
-                                "email": email,
-                                "name": u.get("displayName", ""),
-                                "provider": "microsoft",
-                                "status": "exists",
-                            })
+                            status_label = "exists"
+                        profile = _upsert_employee_from_directory(db, existing, attrs)
+                        synced.append({
+                            "email": email,
+                            "name": u.get("displayName", ""),
+                            "provider": "microsoft",
+                            "status": status_label,
+                            "profile": profile,
+                        })
         except Exception as e:
             errors.append({"provider": "microsoft", "error": str(e)})
 
@@ -348,25 +462,62 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
                         email = u.get("primaryEmail", "").lower().strip()
                         if not email:
                             continue
+                        name_obj = u.get("name") or {}
+                        orgs = u.get("organizations") or []
+                        org = orgs[0] if orgs else {}
+                        phones = u.get("phones") or []
+                        addresses = u.get("addresses") or []
+                        addr = addresses[0] if addresses else {}
+                        attrs = {
+                            "name": name_obj.get("fullName"),
+                            "first_name": name_obj.get("givenName"),
+                            "last_name": name_obj.get("familyName"),
+                            "job_title": org.get("title"),
+                            "department": org.get("department"),
+                            "phone": phones[0].get("value") if phones else None,
+                            "street": addr.get("streetAddress"),
+                            "city": addr.get("locality"),
+                            "state": addr.get("region"),
+                            "postal_code": addr.get("postalCode"),
+                            "active": not u.get("suspended", False),
+                        }
                         existing = db.query(User).filter(User.email == email).first()
                         if not existing:
                             from Auth.Encrypt import hash_password
-                            new_user = User(
+                            existing = User(
                                 email=email,
                                 password=hash_password(secrets.token_urlsafe(16)),
                                 role="employee",
                             )
-                            db.add(new_user)
-                            synced.append({"email": email, "name": u.get("name", {}).get("fullName", ""), "provider": "google", "status": "created"})
+                            db.add(existing)
+                            db.flush()
+                            status_label = "created"
                         else:
-                            synced.append({"email": email, "name": u.get("name", {}).get("fullName", ""), "provider": "google", "status": "exists"})
+                            status_label = "exists"
+                        profile = _upsert_employee_from_directory(db, existing, attrs)
+                        synced.append({
+                            "email": email,
+                            "name": name_obj.get("fullName", ""),
+                            "provider": "google",
+                            "status": status_label,
+                            "profile": profile,
+                        })
         except Exception as e:
             errors.append({"provider": "google", "error": str(e)})
 
     db.commit()
     created_count = len([s for s in synced if s["status"] == "created"])
     existing_count = len([s for s in synced if s["status"] == "exists"])
-    return {"synced": synced, "errors": errors, "created": created_count, "existing": existing_count}
+    profiles_created = len([s for s in synced if s.get("profile") == "created"])
+    profiles_updated = len([s for s in synced if s.get("profile") == "updated"])
+    return {
+        "synced": synced,
+        "errors": errors,
+        "created": created_count,
+        "existing": existing_count,
+        "profiles_created": profiles_created,
+        "profiles_updated": profiles_updated,
+    }
 
 
 @router.get("/users")
