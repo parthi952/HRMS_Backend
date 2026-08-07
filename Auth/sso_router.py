@@ -339,7 +339,16 @@ def _ensure_department(db: Session, name: str):
     if dep:
         return dep.Dep_name
     from Caluclation.IdCustom import generate_next_dep_id
-    dep = DepartmentDB.Department(Dep_id=generate_next_dep_id(db), Dep_name=name)
+    # Fill the presentation columns too â€” the department screens expect them,
+    # and a half-populated row renders as a blank card.
+    dep = DepartmentDB.Department(
+        Dep_id=generate_next_dep_id(db),
+        Dep_name=name,
+        Dep_head="",
+        Dep_icon="Building2",
+        bg_color="#EEF2FF",
+        icon_color="#4F46E5",
+    )
     db.add(dep)
     db.flush()
     return dep.Dep_name
