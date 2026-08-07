@@ -24,6 +24,7 @@ def _serialize(e: FestivalDB.CommercialEmail):
         "cc_emails": e.cc_emails or "",
         "from_email": e.from_email or "",
         "template_id": e.template_id,
+        "no_template": bool(e.no_template),
         "enabled": e.enabled,
     }
 
@@ -56,7 +57,7 @@ def create_email(data: dict, current_user: User = Depends(get_current_user), db:
     if not data.get("name", "").strip():
         raise HTTPException(status_code=400, detail="name is required")
     audience = data.get("audience", "employees")
-    if audience not in ("employees", "customers", "both"):
+    if audience not in ("employees", "customers", "both", "manual"):
         audience = "employees"
     email = FestivalDB.CommercialEmail(
         name=data["name"].strip(),
@@ -67,6 +68,7 @@ def create_email(data: dict, current_user: User = Depends(get_current_user), db:
         cc_emails=data.get("cc_emails", "").strip() or None,
         from_email=data.get("from_email", "").strip() or None,
         template_id=data.get("template_id") or None,
+        no_template=bool(data.get("no_template", False)),
         enabled=bool(data.get("enabled", True)),
     )
     db.add(email)
@@ -88,7 +90,7 @@ def update_email(email_id: int, data: dict, current_user: User = Depends(get_cur
         email.subject = data["subject"].strip() or email.subject
     if "message" in data:
         email.message = data["message"].strip() or email.message
-    if "audience" in data and data["audience"] in ("employees", "customers", "both"):
+    if "audience" in data and data["audience"] in ("employees", "customers", "both", "manual"):
         email.audience = data["audience"]
     if "to_emails" in data:
         email.to_emails = data["to_emails"].strip() or None
@@ -98,6 +100,8 @@ def update_email(email_id: int, data: dict, current_user: User = Depends(get_cur
         email.from_email = data["from_email"].strip() or None
     if "template_id" in data:
         email.template_id = data["template_id"] or None
+    if "no_template" in data:
+        email.no_template = bool(data["no_template"])
     if "enabled" in data:
         email.enabled = bool(data["enabled"])
     db.commit()
@@ -135,9 +139,12 @@ async def send_commercial_email(email: FestivalDB.CommercialEmail, db: Session):
     if not recipients:
         return False, "No recipient emails found. Please add active employees in Employee Management, or add customer emails under Customer Contacts below."
 
-    template = common.get_template(email.template_id, db)
-    if not template:
-        return False, "No email template configured — add one from Celebrations > Email Templates"
+    if email.no_template:
+        template = None  # send the raw body with no header/footer wrapper
+    else:
+        template = common.get_template(email.template_id, db)
+        if not template:
+            return False, "No email template configured — add one from Celebrations > Email Templates"
 
     cfg = EmailSending.get_or_create_config(db)
     batch_size = cfg.batch_size or 30

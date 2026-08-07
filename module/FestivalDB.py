@@ -86,6 +86,7 @@ class CommercialEmail(Base):
     cc_emails = Column(String, nullable=True)
     from_email = Column(String, nullable=True)
     template_id = Column(Integer, nullable=True)
+    no_template = Column(Boolean, default=False)  # send raw body, no header/footer wrapper
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

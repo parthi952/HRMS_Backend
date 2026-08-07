@@ -42,6 +42,7 @@ try:
             "ALTER TABLE email_provider_config ADD COLUMN delay_seconds INTEGER DEFAULT 0;",
             "ALTER TABLE wish_contacts ADD COLUMN company_name VARCHAR;",
             "ALTER TABLE wish_contacts ADD COLUMN contact_type VARCHAR DEFAULT 'customer';",
+            "ALTER TABLE commercial_emails ADD COLUMN no_template BOOLEAN DEFAULT FALSE;",
         ]:
             try:
                 conn.execute(text(col))
