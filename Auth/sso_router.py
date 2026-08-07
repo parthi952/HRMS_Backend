@@ -612,6 +612,86 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
     }
 
 
+async def _fetch_directory_user(email: str) -> dict:
+    """Look one address up in the configured directory. Best effort — a missing
+    or misconfigured provider just means we fall back to the login's own data."""
+    cfg = _load_config()
+    m = cfg.get("microsoft", {})
+    if not m.get("enabled") or not m.get("client_id") or not m.get("client_secret"):
+        return {}
+    tenant = m.get("tenant", "common")
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            token_resp = await client.post(
+                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                data={
+                    "client_id": m["client_id"],
+                    "client_secret": m["client_secret"],
+                    "scope": "https://graph.microsoft.com/.default",
+                    "grant_type": "client_credentials",
+                },
+            )
+            token = token_resp.json().get("access_token")
+            if not token:
+                return {}
+            resp = await client.get(
+                f"https://graph.microsoft.com/v1.0/users/{email}"
+                "?$select=displayName,givenName,surname,jobTitle,department,mobilePhone,"
+                "businessPhones,officeLocation,city,state,streetAddress,postalCode,accountEnabled",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code != 200:
+                return {}
+            return resp.json()
+    except Exception:
+        return {}
+
+
+@router.post("/link-me")
+async def sso_link_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Give the signed-in account an employee profile of its own.
+
+    Logins created by hand or by an early SSO sync have no employee row, which
+    leaves My Profile empty with nothing the person can do about it. This only
+    ever touches the caller's own email address.
+    """
+    if current_user.emp_id:
+        return {"emp_id": current_user.emp_id, "status": "already_linked"}
+
+    email = (current_user.email or "").strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Your login has no usable email address.")
+
+    u = await _fetch_directory_user(email)
+    business_phones = u.get("businessPhones") or []
+    attrs = {
+        "name": _clean_display_name(
+            u.get("displayName") or getattr(current_user, "username", None),
+            u.get("givenName"), u.get("surname"), email,
+        ),
+        "first_name": u.get("givenName"),
+        "last_name": u.get("surname"),
+        "job_title": u.get("jobTitle"),
+        "department": u.get("department"),
+        "phone": u.get("mobilePhone") or (business_phones[0] if business_phones else None),
+        "street": u.get("streetAddress") or u.get("officeLocation"),
+        "city": u.get("city"),
+        "state": u.get("state"),
+        "postal_code": u.get("postalCode"),
+        "active": u.get("accountEnabled", True),
+    }
+
+    outcome = _upsert_employee_from_directory(db, current_user, attrs)
+    db.commit()
+    db.refresh(current_user)
+    return {
+        "emp_id": current_user.emp_id,
+        "status": outcome,
+        "from_directory": bool(u),
+        "message": f"Employee profile {outcome} and linked to {email}",
+    }
+
+
 @router.get("/users")
 def sso_list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.role != "admin":
