@@ -420,6 +420,8 @@ def sso_exchange(data: dict):
             raise HTTPException(status_code=404, detail="User not found")
         access = create_access_token(user.email)
         refresh = create_refresh_token(user.email)
+        from Auth.router import link_employee_profile
+        link_employee_profile(user, db)
         return {
             "access_token": access,
             "refresh_token": refresh,

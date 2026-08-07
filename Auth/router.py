@@ -21,6 +21,31 @@ router = APIRouter(
 # Security scheme for Bearer token
 security = HTTPBearer()
 
+def link_employee_profile(user: User, db: Session):
+    """Attach the login to its employee record when it isn't linked yet.
+
+    SSO-provisioned accounts (and hand-made admin accounts) land with
+    emp_id NULL, which leaves the person with no "My Profile" — even when an
+    employee row with the same email already exists. Match on email once and
+    persist it, so it only costs a lookup the first time.
+    """
+    if user.emp_id or not user.email:
+        return user
+    try:
+        import module.EmplyeeDB as EmplyeeDB
+        from sqlalchemy import func
+        emp = db.query(EmplyeeDB.Employee).filter(
+            func.lower(EmplyeeDB.Employee.email) == user.email.strip().lower()
+        ).first()
+        if emp:
+            user.emp_id = emp.Emp_id
+            db.commit()
+            db.refresh(user)
+    except Exception:
+        db.rollback()
+    return user
+
+
 def ensure_default_users(db: Session):
     """
     Ensure default Admin & HR accounts exist in the backend database.
@@ -80,7 +105,9 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
     # Create tokens
     access = create_access_token(user.email)
     refresh = create_refresh_token(user.email)
-    
+
+    link_employee_profile(user, db)
+
     # Resolve real name from linked employee profile
     emp_name = None
     if user.employee:
@@ -123,7 +150,9 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
     # Generate new tokens
     access = create_access_token(user.email)
     refresh = create_refresh_token(user.email)
-    
+
+    link_employee_profile(user, db)
+
     # Resolve real name from linked employee profile
     emp_name = None
     if user.employee:
@@ -144,7 +173,9 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
 
 # ✅ ME ENDPOINT (Profile)
 @router.get("/me", response_model=UserResponse)
-def get_me(current_user: User = Depends(get_current_user)):
+def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    link_employee_profile(current_user, db)
+
     # Resolve real name from linked employee profile
     emp_name = None
     if current_user.employee:
