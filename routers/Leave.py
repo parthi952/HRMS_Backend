@@ -6,6 +6,7 @@ import module.EmplyeeDB as EmplyeeDB, Schemas.employeeSceema as employeeSceema
 from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
+from Auth import roles as roles_util
 
 router = APIRouter(
     prefix="/leave",
@@ -71,7 +72,7 @@ def apply_leave(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if (current_user.role or "").lower() == "employee" and leave_his.Emp_id != current_user.emp_id:
+    if not roles_util.has_role(current_user, "admin", "hr") and leave_his.Emp_id != current_user.emp_id:
         raise HTTPException(status_code=403, detail="You can only apply for your own leaves.")
     # 1. Generate dates from duration
     days_count, f_date, t_date = get_leave_details(leave_his.Duration)

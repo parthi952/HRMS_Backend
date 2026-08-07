@@ -11,6 +11,7 @@ import Schemas.employeeSceema as employeeSceema
 from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
+from Auth import roles as roles_util
 
 router = APIRouter(prefix="/employee", tags=["Employee"])
 
@@ -18,10 +19,9 @@ from Caluclation.PayrollEandD import calculate_salary
 import module.payrollProvider as payrollProvider
 
 def check_employee_permission(emp_id: str, current_user: User):
-    role = (current_user.role or "").lower()
-    if role in ["admin", "hr"]:
+    if roles_util.has_role(current_user, "admin", "hr"):
         return
-    if role == "employee" and current_user.emp_id == emp_id:
+    if current_user.emp_id == emp_id:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -29,8 +29,7 @@ def check_employee_permission(emp_id: str, current_user: User):
     )
 
 def check_admin_or_hr_permission(current_user: User):
-    role = (current_user.role or "").lower()
-    if role not in ["admin", "hr"]:
+    if not roles_util.has_role(current_user, "admin", "hr"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. HR or Admin role required."

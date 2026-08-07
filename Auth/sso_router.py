@@ -16,6 +16,7 @@ from database import get_db
 from Auth.models import User
 from Auth.Token import create_access_token, create_refresh_token
 from Auth.router import get_current_user
+from Auth import roles as roles_util
 
 router = APIRouter(prefix="/Auth/sso", tags=["SSO"])
 
@@ -702,6 +703,7 @@ def sso_list_users(current_user: User = Depends(get_current_user), db: Session =
             "id": u.id,
             "email": u.email,
             "role": u.role,
+            "roles": roles_util.get_roles(u),
             "emp_id": u.emp_id,
             "name": u.employee.name if u.employee else u.email.split("@")[0],
         }
@@ -716,12 +718,21 @@ def sso_update_role(user_id: int, data: dict, current_user: User = Depends(get_c
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    new_role = data.get("role", "employee")
-    if new_role not in ("admin", "hr", "manager", "employee"):
-        raise HTTPException(status_code=400, detail="Invalid role")
-    user.role = new_role
+    # Accepts either the multi-role list or the original single role
+    requested = data.get("roles") if "roles" in data else data.get("role", "employee")
+    assigned = roles_util.normalise(requested)
+    if not assigned:
+        raise HTTPException(status_code=400, detail="Pick at least one valid role")
+    if user.id == current_user.id and "admin" not in assigned:
+        raise HTTPException(status_code=400, detail="You cannot remove your own admin role")
+
+    roles_util.set_roles(user, assigned)
     db.commit()
-    return {"message": f"Role updated to {new_role}"}
+    return {
+        "message": f"Roles updated to {', '.join(assigned)}",
+        "roles": assigned,
+        "role": user.role,
+    }
 
 
 @router.post("/exchange")
@@ -751,6 +762,7 @@ def sso_exchange(data: dict):
             "user_name": user.employee.name if user.employee else email.split("@")[0],
             "user_email": user.email,
             "user_role": user.role,
+            "user_roles": roles_util.get_roles(user),
             "emp_id": user.emp_id,
         }
     finally:

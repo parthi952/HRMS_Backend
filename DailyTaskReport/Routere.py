@@ -6,6 +6,7 @@ from typing import List, Optional
 from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
+from Auth import roles as roles_util
 import module.EmplyeeDB as EmplyeeDB
 from DailyTaskReport.moduale import DailyTaskReport, TaskAssign
 from DailyTaskReport.schema import (
@@ -215,7 +216,7 @@ def get_all_tasks(
     - Manager sees department tasks, tasks assigned to themselves, or tasks they assigned.
     - Employees see tasks assigned to them or their department.
     """
-    if current_user.role in ["admin", "hr"]:
+    if roles_util.has_role(current_user, "admin", "hr"):
         return db.query(TaskAssign).all()
 
     # Get employee profile
@@ -224,7 +225,7 @@ def get_all_tasks(
         # User has no linked employee profile
         return db.query(TaskAssign).filter(TaskAssign.Assigned_By == current_user.email).all()
 
-    if current_user.role == "manager":
+    if roles_util.has_role(current_user, "manager"):
         # Managers see:
         # 1. Tasks in their department
         # 2. Tasks they assigned

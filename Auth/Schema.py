@@ -1,4 +1,4 @@
-from typing import clear_overloads
+from typing import clear_overloads, List
 from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional
 
@@ -35,6 +35,7 @@ class Token(BaseModel):
     refresh_token: str
     token_type: str
     role: str
+    roles: Optional[List[str]] = None
     email: str
     emp_id: Optional[str] = None
     name: Optional[str] = None
@@ -50,5 +51,6 @@ class UserResponse(BaseModel):
     username: Optional[str] = None
     email: str
     role: str
+    roles: Optional[List[str]] = None
     emp_id: Optional[str] = None
     name: Optional[str] = None

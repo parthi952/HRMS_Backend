@@ -8,9 +8,28 @@ from Auth.models import User
 from Auth.Schema import UserCreate, UserLogin, Token, TokenRefreshRequest, UserResponse
 from Auth.Token import create_access_token, create_refresh_token, verify_token, verify_refresh_token
 from Auth.Encrypt import hash_password, verify_password
+from Auth import roles as roles_util
 
 # Ensure table exists
 Base.metadata.create_all(bind=engine)
+
+# create_all never alters an existing table, so new columns need adding by hand.
+try:
+    from sqlalchemy import text as _sa_text
+    with engine.connect() as _conn:
+        try:
+            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN roles VARCHAR;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()  # already present
+        try:
+            # Backfill the set from the single role every existing login has
+            _conn.execute(_sa_text("UPDATE users SET roles = role WHERE roles IS NULL AND role IS NOT NULL;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+except Exception:
+    pass
 
 # Router
 router = APIRouter(
@@ -120,6 +139,7 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         refresh_token=refresh,
         token_type="bearer",
         role=user.role,
+        roles=roles_util.get_roles(user),
         email=user.email,
         emp_id=user.emp_id,
         name=emp_name
@@ -165,6 +185,7 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
         refresh_token=refresh,
         token_type="bearer",
         role=user.role,
+        roles=roles_util.get_roles(user),
         email=user.email,
         emp_id=user.emp_id,
         name=emp_name
@@ -188,6 +209,7 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
         username=current_user.username,
         email=current_user.email,
         role=current_user.role,
+        roles=roles_util.get_roles(current_user),
         emp_id=current_user.emp_id,
         name=emp_name
     )

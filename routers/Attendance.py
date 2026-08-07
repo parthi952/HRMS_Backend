@@ -6,6 +6,7 @@ import module.EmplyeeDB as EmplyeeDB
 from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
+from Auth import roles as roles_util
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
@@ -15,7 +16,7 @@ def get_attendance(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if (current_user.role or "").lower() not in ["admin", "hr"]:
+    if not roles_util.has_role(current_user, "admin", "hr"):
         raise HTTPException(status_code=403, detail="Access denied. HR or Admin role required.")
     """
     Fetches attendance for a specific date. 
@@ -76,7 +77,7 @@ def update_attendance(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if (current_user.role or "").lower() == "employee" and emp_id != current_user.emp_id:
+    if not roles_util.has_role(current_user, "admin", "hr") and emp_id != current_user.emp_id:
         raise HTTPException(status_code=403, detail="Access denied. You can only update your own attendance.")
     if attendance_date > date_type.today():
         raise HTTPException(status_code=400, detail="Cannot update attendance for future dates")
@@ -103,7 +104,7 @@ def AttendanceofEmployee(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if (current_user.role or "").lower() == "employee" and emp_id != current_user.emp_id:
+    if not roles_util.has_role(current_user, "admin", "hr") and emp_id != current_user.emp_id:
         raise HTTPException(status_code=403, detail="Access denied. You can only view your own attendance history.")
     record = db.query(EmplyeeDB.Attendance).filter(
         EmplyeeDB.Attendance.Emp_id == emp_id
@@ -116,7 +117,7 @@ def check_attendance_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if (current_user.role or "").lower() not in ["admin", "hr"]:
+    if not roles_util.has_role(current_user, "admin", "hr"):
         raise HTTPException(status_code=403, detail="Access denied. HR or Admin role required.")
     """
     Diagnostic endpoint to check the sync status of attendance records.
