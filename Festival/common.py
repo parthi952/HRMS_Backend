@@ -109,20 +109,43 @@ import re
 
 
 def _center_and_format_images(html_content: str) -> str:
+    """Give body images sane email defaults without clobbering choices the user
+    made in the editor. Any size or alignment already set on the tag wins — we
+    only fill in what is missing."""
     if not html_content or "<img" not in html_content.lower():
         return html_content or ""
 
     def replace_img(match):
         img_tag = match.group(0)
-        # Ensure display:block; margin:12px auto; max-width:100%; height:auto; border-radius:12px;
-        if 'style="' in img_tag:
-            img_tag = re.sub(
-                r'style="([^"]*)"',
-                r'style="\1;display:block;margin:12px auto;max-width:100%;height:auto;border-radius:12px;"',
-                img_tag
-            )
+        style_match = re.search(r'style="([^"]*)"', img_tag)
+        style = style_match.group(1) if style_match else ""
+        style_lc = style.lower()
+
+        # The editor writes explicit margins when the user picks left/center/right
+        user_aligned = "margin-left" in style_lc or "margin-right" in style_lc
+
+        additions = []
+        if "max-width" not in style_lc:
+            additions.append("max-width:100%")
+        if "height" not in style_lc:
+            additions.append("height:auto")
+        if "border-radius" not in style_lc:
+            additions.append("border-radius:12px")
+        if "display" not in style_lc:
+            additions.append("display:block")
+        if not user_aligned and "margin" not in style_lc:
+            additions.append("margin:12px auto")
+
+        new_style = ";".join([s for s in [style.rstrip("; ")] if s] + additions)
+        if style_match:
+            img_tag = img_tag[:style_match.start()] + f'style="{new_style}"' + img_tag[style_match.end():]
         else:
-            img_tag = img_tag.replace('<img ', '<img style="display:block;margin:12px auto;max-width:100%;height:auto;border-radius:12px;" ')
+            img_tag = img_tag.replace("<img ", f'<img style="{new_style}" ', 1)
+
+        if user_aligned:
+            # Alignment is carried by the image's own margins; an extra centering
+            # wrapper would fight it in clients that honour text-align.
+            return img_tag
         return f'<div align="center" style="text-align:center;margin:12px 0;">{img_tag}</div>'
 
     return re.sub(r'<img\s+[^>]*>', replace_img, html_content)
