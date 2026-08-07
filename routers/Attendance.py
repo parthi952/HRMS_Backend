@@ -4,11 +4,19 @@ from datetime import date as date_type
 from typing import Dict, Any
 import module.EmplyeeDB as EmplyeeDB
 from database import get_db
+from Auth.router import get_current_user
+from Auth.models import User
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
 @router.get("/")
-def get_attendance(attendance_date: date_type, db: Session = Depends(get_db)):
+def get_attendance(
+    attendance_date: date_type,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if (current_user.role or "").lower() not in ["admin", "hr"]:
+        raise HTTPException(status_code=403, detail="Access denied. HR or Admin role required.")
     """
     Fetches attendance for a specific date. 
     Restricted to current or past dates only.
@@ -65,8 +73,11 @@ def update_attendance(
     emp_id: str, 
     payload: Dict[str, Any], 
     attendance_date: date_type = Query(...), 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    if (current_user.role or "").lower() == "employee" and emp_id != current_user.emp_id:
+        raise HTTPException(status_code=403, detail="Access denied. You can only update your own attendance.")
     if attendance_date > date_type.today():
         raise HTTPException(status_code=400, detail="Cannot update attendance for future dates")
 
@@ -87,14 +98,26 @@ def update_attendance(
     return {"message": "Success"}
 
 @router.get("/record/{emp_id}")
-def AttendanceofEmployee(emp_id:str,db:Session = Depends(get_db)):
+def AttendanceofEmployee(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if (current_user.role or "").lower() == "employee" and emp_id != current_user.emp_id:
+        raise HTTPException(status_code=403, detail="Access denied. You can only view your own attendance history.")
     record = db.query(EmplyeeDB.Attendance).filter(
         EmplyeeDB.Attendance.Emp_id == emp_id
     ).all()
     return record
 
 @router.get("/check-status")
-def check_attendance_status(attendance_date: date_type, db: Session = Depends(get_db)):
+def check_attendance_status(
+    attendance_date: date_type,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if (current_user.role or "").lower() not in ["admin", "hr"]:
+        raise HTTPException(status_code=403, detail="Access denied. HR or Admin role required.")
     """
     Diagnostic endpoint to check the sync status of attendance records.
     """

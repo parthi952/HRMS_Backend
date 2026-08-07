@@ -4,6 +4,8 @@ from sqlalchemy import func
 from datetime import datetime
 import module.EmplyeeDB as EmplyeeDB, Schemas.employeeSceema as employeeSceema
 from database import get_db
+from Auth.router import get_current_user
+from Auth.models import User
 
 router = APIRouter(
     prefix="/leave",
@@ -35,7 +37,13 @@ def get_leave_details(duration_str: str):
 # ✅ GET ALL BALANCES
 # ==============================
 @router.get("/all-balances")
-def get_all_leave_balances(db: Session = Depends(get_db)):
+def get_all_leave_balances(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if (current_user.role or "").lower() not in ["admin", "hr"]:
+        raise HTTPException(status_code=403, detail="Access denied. HR or Admin role required.")
+
     results = db.query(
         EmplyeeDB.Employee.Emp_id,
         EmplyeeDB.Employee.name,
@@ -58,7 +66,13 @@ def get_all_leave_balances(db: Session = Depends(get_db)):
 # ✅ APPLY LEAVE (With Date Logic)
 # ==============================
 @router.post("/apply")
-def apply_leave(leave_his: employeeSceema.LeaveHistory, db: Session = Depends(get_db)):
+def apply_leave(
+    leave_his: employeeSceema.LeaveHistory,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if (current_user.role or "").lower() == "employee" and leave_his.Emp_id != current_user.emp_id:
+        raise HTTPException(status_code=403, detail="You can only apply for your own leaves.")
     # 1. Generate dates from duration
     days_count, f_date, t_date = get_leave_details(leave_his.Duration)
     
@@ -95,9 +109,6 @@ def apply_leave(leave_his: employeeSceema.LeaveHistory, db: Session = Depends(ge
 
 
 # UPDATE STATUS (Approval Logic with Role Hierarchy)
-
-from Auth.router import get_current_user
-from Auth.models import User
 
 @router.put("/update-status/{leave_id}")
 def update_status(
@@ -154,7 +165,13 @@ def update_status(
 #  GET INDIVIDUAL HISTORY & BALANCE
 
 @router.get("/history/{emp_id}")
-def get_employee_leave_details(emp_id: str, db: Session = Depends(get_db)):
+def get_employee_leave_details(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if (current_user.role or "").lower() == "employee" and emp_id != current_user.emp_id:
+        raise HTTPException(status_code=403, detail="Access denied. You can only view your own leave history.")
     
     # 1. Fetch Master Balance
     balance = db.query(EmplyeeDB.LeaveDB).filter(EmplyeeDB.LeaveDB.Emp_id == emp_id).first()
@@ -195,7 +212,13 @@ def get_employee_leave_details(emp_id: str, db: Session = Depends(get_db)):
 # ✅ ADMIN: GET ALL LEAVE REQUESTS
 # ==============================
 @router.get("/all-requests")
-def get_all_leave_requests(db: Session = Depends(get_db)):
+def get_all_leave_requests(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if (current_user.role or "").lower() not in ["admin", "hr"]:
+        raise HTTPException(status_code=403, detail="Access denied. HR or Admin role required.")
+
     requests = db.query(EmplyeeDB.LeaveHistoryDB).order_by(EmplyeeDB.LeaveHistoryDB.id.desc()).all()
     return [
         {
@@ -221,8 +244,11 @@ def get_all_leave_requests(db: Session = Depends(get_db)):
 def update_status_admin(
     leave_id: int,
     status: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    if (current_user.role or "").lower() not in ["admin", "hr"]:
+        raise HTTPException(status_code=403, detail="Access denied. HR or Admin role required.")
     leave = db.query(EmplyeeDB.LeaveHistoryDB).filter(EmplyeeDB.LeaveHistoryDB.id == leave_id).first()
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")

@@ -9,11 +9,32 @@ from Caluclation.IdCustom import generate_next_empid
 import module.EmplyeeDB as EmplyeeDB
 import Schemas.employeeSceema as employeeSceema
 from database import get_db
+from Auth.router import get_current_user
+from Auth.models import User
 
 router = APIRouter(prefix="/employee", tags=["Employee"])
 
 from Caluclation.PayrollEandD import calculate_salary
 import module.payrollProvider as payrollProvider
+
+def check_employee_permission(emp_id: str, current_user: User):
+    role = (current_user.role or "").lower()
+    if role in ["admin", "hr"]:
+        return
+    if role == "employee" and current_user.emp_id == emp_id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Access denied. You can only view or modify your own records."
+    )
+
+def check_admin_or_hr_permission(current_user: User):
+    role = (current_user.role or "").lower()
+    if role not in ["admin", "hr"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. HR or Admin role required."
+        )
 
 
 # ─── Employee CRUD ────────────────────────────────────────────────────────────
@@ -21,8 +42,11 @@ import module.payrollProvider as payrollProvider
 
 @router.post("/Register", status_code=status.HTTP_201_CREATED)
 def create_employee(
-    emp_in: employeeSceema.EmployeeCreate, db: Session = Depends(get_db)
+    emp_in: employeeSceema.EmployeeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_admin_or_hr_permission(current_user)
     try:
         new_generated_id = generate_next_empid(db)
 
@@ -129,7 +153,11 @@ def create_employee(
 
 
 @router.get("/next-id")
-def get_next_id(db: Session = Depends(get_db)):
+def get_next_id(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_admin_or_hr_permission(current_user)
     from Caluclation.IdCustom import generate_next_empid
 
     next_id = generate_next_empid(db)
@@ -137,7 +165,12 @@ def get_next_id(db: Session = Depends(get_db)):
 
 
 @router.get("/{emp_id}")
-def get_employee(emp_id: str, db: Session = Depends(get_db)):
+def get_employee(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_employee_permission(emp_id, current_user)
     """
     Fetches employee details and calculates dynamic payroll based on 
     assigned provider's earnings and deductions.
@@ -179,7 +212,11 @@ def get_employee(emp_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/")
-def list_employees(db: Session = Depends(get_db)):
+def list_employees(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_admin_or_hr_permission(current_user)
     stmt = select(EmplyeeDB.Employee)
     employees = db.execute(stmt).mappings().all()
     return employees
@@ -190,7 +227,9 @@ def update_employee_status(
     emp_id: str,
     payload: dict,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_admin_or_hr_permission(current_user)
     emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -207,7 +246,9 @@ def update_employee(
     emp_id: str,
     emp_in: employeeSceema.EmployeeCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_employee_permission(emp_id, current_user)
     emp = (
         db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     )
@@ -233,7 +274,12 @@ def update_employee(
 
 
 @router.get("/EmployeeEducation/{emp_id}")
-def get_employee_education(emp_id: str, db: Session = Depends(get_db)):
+def get_employee_education(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_employee_permission(emp_id, current_user)
     education = (
         db.query(EmplyeeDB.Education).filter(EmplyeeDB.Education.emp_id == emp_id).all()
     )
@@ -245,7 +291,9 @@ def create_employee_education(
     emp_id: str,
     education_in: List[employeeSceema.EducationCreate],
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_employee_permission(emp_id, current_user)
     emp = (
         db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     )
@@ -275,7 +323,9 @@ def update_employee_education(
     emp_id: str,
     education_in: List[employeeSceema.EducationCreate],
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_employee_permission(emp_id, current_user)
     emp = (
         db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     )
@@ -317,7 +367,12 @@ def update_employee_education(
 
 
 @router.get("/EmployeeFamilys/{emp_id}")
-def get_employee_Familys(emp_id: str, db: Session = Depends(get_db)):
+def get_employee_Familys(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_employee_permission(emp_id, current_user)
     Familys = (
         db.query(EmplyeeDB.Familys).filter(EmplyeeDB.Familys.emp_id == emp_id).all()
     )
@@ -329,7 +384,9 @@ def create_employee_Familys(
     emp_id: str,
     Familys_in: List[employeeSceema.FamilyCreate],
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_employee_permission(emp_id, current_user)
     emp = (
         db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     )
@@ -370,7 +427,9 @@ def update_employee_Familys(
     emp_id: str,
     Familys_in: List[employeeSceema.FamilyCreate],
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_employee_permission(emp_id, current_user)
     emp = (
         db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     )
@@ -423,7 +482,12 @@ def update_employee_Familys(
 
 
 @router.get("/EmployeeWorkExp/{emp_id}")
-def get_employee_work_exp(emp_id: str, db: Session = Depends(get_db)):
+def get_employee_work_exp(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_employee_permission(emp_id, current_user)
     work = (
         db.query(EmplyeeDB.WorkExpriance)
         .filter(EmplyeeDB.WorkExpriance.emp_id == emp_id)
@@ -437,7 +501,9 @@ def create_employee_work_exp(
     emp_id: str,
     work_in: List[employeeSceema.WorkExpCreate],
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_employee_permission(emp_id, current_user)
     emp = (
         db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     )
@@ -468,7 +534,9 @@ def update_employee_work_exp(
     emp_id: str,
     work_in: List[employeeSceema.WorkExpCreate],
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_employee_permission(emp_id, current_user)
     emp = (
         db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     )
@@ -507,7 +575,9 @@ def update_employee_work_exp(
 def create_employee_salary(
     payload: dict,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_admin_or_hr_permission(current_user)
     emp_id = payload.get("emp_id") or payload.get("Emp_id")
     if not emp_id:
         raise HTTPException(status_code=400, detail="emp_id is required")
@@ -525,10 +595,12 @@ def create_employee_salary(
 def create_employee_bank(
     payload: dict,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     emp_id = payload.get("emp_id") or payload.get("Emp_id")
     if not emp_id:
         raise HTTPException(status_code=400, detail="emp_id is required")
+    check_employee_permission(emp_id, current_user)
     emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -543,7 +615,9 @@ def create_employee_bank(
 def create_employee_insurance(
     payload: dict,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    check_admin_or_hr_permission(current_user)
     emp_id = payload.get("emp_id") or payload.get("Emp_id")
     if not emp_id:
         raise HTTPException(status_code=400, detail="emp_id is required")
@@ -561,7 +635,12 @@ def create_employee_insurance(
 
 
 @router.delete("/{emp_id}")
-def delete_employee(emp_id: str, db: Session = Depends(get_db)):
+def delete_employee(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_admin_or_hr_permission(current_user)
     emp = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
