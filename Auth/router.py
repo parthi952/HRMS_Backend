@@ -81,13 +81,21 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
     access = create_access_token(user.email)
     refresh = create_refresh_token(user.email)
     
+    # Resolve real name from linked employee profile
+    emp_name = None
+    if user.employee:
+        emp_name = user.employee.name
+    if not emp_name:
+        emp_name = user.username or user.email.split("@")[0]
+
     return Token(
         access_token=access,
         refresh_token=refresh,
         token_type="bearer",
         role=user.role,
         email=user.email,
-        emp_id=user.emp_id
+        emp_id=user.emp_id,
+        name=emp_name
     )
 
 
@@ -116,19 +124,41 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
     access = create_access_token(user.email)
     refresh = create_refresh_token(user.email)
     
+    # Resolve real name from linked employee profile
+    emp_name = None
+    if user.employee:
+        emp_name = user.employee.name
+    if not emp_name:
+        emp_name = user.username or user.email.split("@")[0]
+
     return Token(
         access_token=access,
         refresh_token=refresh,
         token_type="bearer",
         role=user.role,
         email=user.email,
-        emp_id=user.emp_id
+        emp_id=user.emp_id,
+        name=emp_name
     )
 
 
 # ✅ ME ENDPOINT (Profile)
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    # Resolve real name from linked employee profile
+    emp_name = None
+    if current_user.employee:
+        emp_name = current_user.employee.name
+    if not emp_name:
+        emp_name = current_user.username or current_user.email.split("@")[0]
+
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        role=current_user.role,
+        emp_id=current_user.emp_id,
+        name=emp_name
+    )
 
 

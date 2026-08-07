@@ -37,6 +37,7 @@ class Token(BaseModel):
     role: str
     email: str
     emp_id: Optional[str] = None
+    name: Optional[str] = None
 
 
 class TokenRefreshRequest(BaseModel):
@@ -50,3 +51,4 @@ class UserResponse(BaseModel):
     email: str
     role: str
     emp_id: Optional[str] = None
+    name: Optional[str] = None
