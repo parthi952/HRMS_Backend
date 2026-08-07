@@ -260,6 +260,62 @@ def _finish_sso(email: str):
         db.close()
 
 
+# Mailboxes a tenant carries that are not people — rooms, shared boxes,
+# automation accounts. Matched against the local part of the address.
+_NON_HUMAN_HINTS = (
+    "noreply", "no-reply", "donotreply", "do-not-reply", "postmaster", "mailer-daemon",
+    "admin@", "administrator", "helpdesk", "support@", "info@", "sales@", "contact@",
+    "billing@", "accounts@", "careers@", "hr@", "service", "svc-", "svc_", "sync",
+    "test@", "demo@", "backup", "room", "meeting", "conference", "equipment",
+    "discoverysearchmailbox", "healthmailbox", "systemmailbox", "spam", "abuse@",
+)
+
+
+def _directory_skip_reason(u: dict, email: str) -> str | None:
+    """Decide whether a directory entry represents a real employee.
+
+    A tenant is full of guests, shared mailboxes, room resources and service
+    accounts. Provisioning all of them fills the employee directory with rows
+    nobody wants, so filter them out and report why.
+    """
+    if not email or "@" not in email:
+        return "no email address"
+    if (u.get("userType") or "Member").strip().lower() == "guest":
+        return "guest account"
+    if "#ext#" in (u.get("userPrincipalName") or "").lower():
+        return "external/guest account"
+    if not (u.get("mail") or "").strip():
+        return "no mailbox (mail attribute empty)"
+    # Rooms, shared mailboxes and service accounts carry no user licence
+    if "assignedLicenses" in u and not (u.get("assignedLicenses") or []):
+        return "no assigned licence (shared mailbox / room / service account)"
+    local = email.split("@")[0].lower()
+    for hint in _NON_HUMAN_HINTS:
+        needle = hint.rstrip("@")
+        if needle and (local == needle or needle in local):
+            return f"looks like a non-person mailbox ({needle})"
+    return None
+
+
+def _clean_display_name(display_name, given, surname, email) -> str:
+    """Pick the best available human name.
+
+    Directory display names are sometimes blank or carry the address itself, so
+    fall back to given+surname and finally to the local part of the email —
+    never leave the record showing a raw address.
+    """
+    name = (display_name or "").strip()
+    if name and "@" not in name:
+        return name
+    built = " ".join(p for p in [(given or "").strip(), (surname or "").strip()] if p).strip()
+    if built:
+        return built
+    if name:
+        name = name.split("@")[0]
+    local = (name or (email or "").split("@")[0] or "User").replace(".", " ").replace("_", " ").replace("-", " ")
+    return " ".join(w.capitalize() for w in local.split() if w) or "User"
+
+
 def _as_int(value):
     try:
         return int(str(value).strip())
@@ -330,6 +386,16 @@ def _upsert_employee_from_directory(db: Session, user: User, attrs: dict):
         db.flush()
         outcome = "created"
     else:
+        # The display name is the directory's to own — earlier syncs left
+        # placeholders built from the email local part, and those must heal.
+        directory_name = (attrs.get("name") or "").strip()
+        current_name = (emp.name or "").strip()
+        if directory_name and directory_name != current_name and (
+            not current_name or "@" in current_name or current_name.lower() == email.split("@")[0].lower()
+        ):
+            emp.name = directory_name
+            outcome = "updated"
+
         fillable = {
             "name": attrs.get("name"),
             "f_name": attrs.get("first_name"),
@@ -365,6 +431,7 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
 
     cfg = _load_config()
     synced = []
+    skipped = []
     errors = []
 
     if cfg.get("microsoft", {}).get("enabled"):
@@ -385,53 +452,65 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
                 if "access_token" not in tokens:
                     errors.append({"provider": "microsoft", "error": tokens.get("error_description", "Failed to get app token. Ensure 'User.Read.All' application permission is granted.")})
                 else:
-                    users_resp = await client.get(
+                    url = (
                         "https://graph.microsoft.com/v1.0/users"
-                        "?$select=displayName,givenName,surname,mail,userPrincipalName,jobTitle,"
+                        "?$select=id,displayName,givenName,surname,mail,userPrincipalName,jobTitle,"
                         "department,mobilePhone,businessPhones,officeLocation,city,state,"
-                        "streetAddress,postalCode,accountEnabled&$top=999",
-                        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+                        "streetAddress,postalCode,accountEnabled,userType,assignedLicenses&$top=999"
                     )
-                    users_data = users_resp.json()
-                    for u in users_data.get("value", []):
-                        email = (u.get("mail") or u.get("userPrincipalName") or "").lower().strip()
-                        if not email:
-                            continue
-                        business_phones = u.get("businessPhones") or []
-                        attrs = {
-                            "name": u.get("displayName"),
-                            "first_name": u.get("givenName"),
-                            "last_name": u.get("surname"),
-                            "job_title": u.get("jobTitle"),
-                            "department": u.get("department"),
-                            "phone": u.get("mobilePhone") or (business_phones[0] if business_phones else None),
-                            "street": u.get("streetAddress") or u.get("officeLocation"),
-                            "city": u.get("city"),
-                            "state": u.get("state"),
-                            "postal_code": u.get("postalCode"),
-                            "active": u.get("accountEnabled", True),
-                        }
-                        existing = db.query(User).filter(User.email == email).first()
-                        if not existing:
-                            from Auth.Encrypt import hash_password
-                            existing = User(
-                                email=email,
-                                password=hash_password(secrets.token_urlsafe(16)),
-                                role="employee",
-                            )
-                            db.add(existing)
-                            db.flush()
-                            status_label = "created"
-                        else:
-                            status_label = "exists"
-                        profile = _upsert_employee_from_directory(db, existing, attrs)
-                        synced.append({
-                            "email": email,
-                            "name": u.get("displayName", ""),
-                            "provider": "microsoft",
-                            "status": status_label,
-                            "profile": profile,
-                        })
+                    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+                    # Graph pages at 999 — follow @odata.nextLink or a big tenant
+                    # silently loses everyone past the first page.
+                    while url:
+                        users_resp = await client.get(url, headers=headers)
+                        if users_resp.status_code == 403:
+                            errors.append({"provider": "microsoft", "error": "Microsoft Graph denied listing users. Add the 'User.Read.All' APPLICATION permission to the Azure app registration and grant admin consent."})
+                            break
+                        users_data = users_resp.json()
+                        for u in users_data.get("value", []):
+                            email = (u.get("mail") or u.get("userPrincipalName") or "").lower().strip()
+                            reason = _directory_skip_reason(u, email)
+                            if reason:
+                                skipped.append({"email": email or "(no email)", "name": u.get("displayName") or "", "provider": "microsoft", "reason": reason})
+                                continue
+                            business_phones = u.get("businessPhones") or []
+                            display_name = _clean_display_name(u.get("displayName"), u.get("givenName"), u.get("surname"), email)
+                            attrs = {
+                                "name": display_name,
+                                "first_name": u.get("givenName"),
+                                "last_name": u.get("surname"),
+                                "job_title": u.get("jobTitle"),
+                                "department": u.get("department"),
+                                "phone": u.get("mobilePhone") or (business_phones[0] if business_phones else None),
+                                "street": u.get("streetAddress") or u.get("officeLocation"),
+                                "city": u.get("city"),
+                                "state": u.get("state"),
+                                "postal_code": u.get("postalCode"),
+                                "active": u.get("accountEnabled", True),
+                            }
+                            existing = db.query(User).filter(User.email == email).first()
+                            if not existing:
+                                from Auth.Encrypt import hash_password
+                                existing = User(
+                                    email=email,
+                                    password=hash_password(secrets.token_urlsafe(16)),
+                                    role="employee",
+                                )
+                                db.add(existing)
+                                db.flush()
+                                status_label = "created"
+                            else:
+                                status_label = "exists"
+                            profile = _upsert_employee_from_directory(db, existing, attrs)
+                            synced.append({
+                                "email": email,
+                                "name": display_name,
+                                "provider": "microsoft",
+                                "status": status_label,
+                                "profile": profile,
+                            })
+                        db.commit()
+                        url = users_data.get("@odata.nextLink")
         except Exception as e:
             errors.append({"provider": "microsoft", "error": str(e)})
 
@@ -460,7 +539,15 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
                     users_data = users_resp.json()
                     for u in users_data.get("users", []):
                         email = u.get("primaryEmail", "").lower().strip()
-                        if not email:
+                        # Google exposes mailbox kind differently — reuse the same
+                        # rules by presenting the entry in Graph's shape.
+                        reason = _directory_skip_reason(
+                            {"userType": "Guest" if u.get("isGuest") else "Member",
+                             "userPrincipalName": email, "mail": email},
+                            email,
+                        )
+                        if reason:
+                            skipped.append({"email": email or "(no email)", "name": (u.get("name") or {}).get("fullName", ""), "provider": "google", "reason": reason})
                             continue
                         name_obj = u.get("name") or {}
                         orgs = u.get("organizations") or []
@@ -468,8 +555,11 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
                         phones = u.get("phones") or []
                         addresses = u.get("addresses") or []
                         addr = addresses[0] if addresses else {}
+                        display_name = _clean_display_name(
+                            name_obj.get("fullName"), name_obj.get("givenName"), name_obj.get("familyName"), email
+                        )
                         attrs = {
-                            "name": name_obj.get("fullName"),
+                            "name": display_name,
                             "first_name": name_obj.get("givenName"),
                             "last_name": name_obj.get("familyName"),
                             "job_title": org.get("title"),
@@ -497,7 +587,7 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
                         profile = _upsert_employee_from_directory(db, existing, attrs)
                         synced.append({
                             "email": email,
-                            "name": name_obj.get("fullName", ""),
+                            "name": display_name,
                             "provider": "google",
                             "status": status_label,
                             "profile": profile,
@@ -512,9 +602,11 @@ async def sso_sync_users(current_user: User = Depends(get_current_user), db: Ses
     profiles_updated = len([s for s in synced if s.get("profile") == "updated"])
     return {
         "synced": synced,
+        "skipped": skipped,
         "errors": errors,
         "created": created_count,
         "existing": existing_count,
+        "skipped_count": len(skipped),
         "profiles_created": profiles_created,
         "profiles_updated": profiles_updated,
     }
