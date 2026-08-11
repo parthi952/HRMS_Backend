@@ -6,7 +6,10 @@ import os
 import json
 import secrets
 import time
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # fcntl is not available on Windows
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -45,7 +48,8 @@ def _with_codes_lock(mutate_fn):
     if not os.path.exists(CODES_PATH):
         open(CODES_PATH, "a").close()
     with open(CODES_PATH, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_EX)
         try:
             content = f.read().strip()
             codes = json.loads(content) if content else {}
@@ -55,7 +59,8 @@ def _with_codes_lock(mutate_fn):
             json.dump(codes, f)
             return result
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            if fcntl:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def _set_code(key: str, value: dict):
@@ -339,7 +344,7 @@ def _ensure_department(db: Session, name: str):
     if dep:
         return dep.Dep_name
     from Caluclation.IdCustom import generate_next_dep_id
-    # Fill the presentation columns too â€” the department screens expect them,
+    # Fill the presentation columns too — the department screens expect them,
     # and a half-populated row renders as a blank card.
     dep = DepartmentDB.Department(
         Dep_id=generate_next_dep_id(db),

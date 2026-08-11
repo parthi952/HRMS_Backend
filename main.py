@@ -31,7 +31,11 @@ from Auth.sso_router import router as sso_router
 from ManagerPort.M_Leave import router as ManagerPort_Leave
 from Festival.FestivalRouter import router as festival_router, seed_default_festivals, seed_default_template, run_daily_festival_check
 from Festival.CommercialRouter import router as commercial_router
-from apscheduler.schedulers.background import BackgroundScheduler
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    scheduler = BackgroundScheduler()
+except ImportError:
+    scheduler = None
 
 
 
@@ -48,7 +52,6 @@ from database import engine, get_db
 
 import module.OffBoardDB as OffBoardDB
 
-scheduler = BackgroundScheduler()
 
 
 def _festival_job():
@@ -66,11 +69,13 @@ async def lifespan(app: FastAPI):
     seed_default_festivals()
     seed_default_template()
 
-    scheduler.add_job(_festival_job, "interval", minutes=5, id="festival_check", replace_existing=True)
-    scheduler.start()
+    if scheduler:
+        scheduler.add_job(_festival_job, "interval", minutes=5, id="festival_check", replace_existing=True)
+        scheduler.start()
 
     yield
-    scheduler.shutdown(wait=False)
+    if scheduler:
+        scheduler.shutdown(wait=False)
     print("Shutting down...")
 
 
@@ -87,6 +92,7 @@ app.add_middleware(
 UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+app.mount("/api/uploads", StaticFiles(directory=UPLOADS_DIR), name="api_uploads")
 
 # Router for Api
 

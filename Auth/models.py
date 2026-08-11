@@ -5,6 +5,7 @@ from sqlalchemy.orm import relationship
 
 from database import Base
 # pyrefly: ignore [missing-import]
+import module.PayrollDB
 from module.EmplyeeDB import Employee
 
 class User(Base):
@@ -22,4 +23,4 @@ class User(Base):
     emp_id        = Column(String, ForeignKey("employees.Emp_id", ondelete="SET NULL"), nullable=True)
 
     # Relationship back to Employee profile if linked
-    employee = relationship("Employee")
+    employee = relationship("Employee")
