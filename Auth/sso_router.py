@@ -39,28 +39,41 @@ def _load_config() -> dict:
 def _save_config(cfg: dict):
     with open(CONFIG_PATH, "w") as f:
         json.dump(cfg, f, indent=2)
+_IN_MEMORY_CODES = {}
 
 
 def _with_codes_lock(mutate_fn):
-    # Gunicorn runs multiple worker processes; an in-memory dict would not be
-    # shared between them, so SSO state/codes are persisted to a locked file
-    # that every worker reads and writes.
-    if not os.path.exists(CODES_PATH):
-        open(CODES_PATH, "a").close()
-    with open(CODES_PATH, "r+") as f:
-        if fcntl:
-            fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            content = f.read().strip()
-            codes = json.loads(content) if content else {}
-            result = mutate_fn(codes)
-            f.seek(0)
-            f.truncate()
-            json.dump(codes, f)
-            return result
-        finally:
+    global _IN_MEMORY_CODES
+    try:
+        if not os.path.exists(CODES_PATH):
+            with open(CODES_PATH, "w") as f:
+                json.dump({}, f)
+        with open(CODES_PATH, "r+") as f:
             if fcntl:
-                fcntl.flock(f, fcntl.LOCK_UN)
+                try:
+                    fcntl.flock(f, fcntl.LOCK_EX)
+                except Exception:
+                    pass
+            try:
+                content = f.read().strip()
+                codes = json.loads(content) if content else {}
+            except Exception:
+                codes = {}
+            try:
+                result = mutate_fn(codes)
+                f.seek(0)
+                f.truncate()
+                json.dump(codes, f)
+                return result
+            finally:
+                if fcntl:
+                    try:
+                        fcntl.flock(f, fcntl.LOCK_UN)
+                    except Exception:
+                        pass
+    except Exception:
+        # Fallback to in-memory store if file operations fail on server
+        return mutate_fn(_IN_MEMORY_CODES)
 
 
 def _set_code(key: str, value: dict):
@@ -86,9 +99,11 @@ def _cleanup_codes():
 @router.get("/config/public")
 def sso_config_public():
     cfg = _load_config()
+    g = cfg.get("google", {})
+    m = cfg.get("microsoft", {})
     return {
-        "google": cfg.get("google", {}).get("enabled", False),
-        "microsoft": cfg.get("microsoft", {}).get("enabled", False),
+        "google": bool(g.get("enabled") and (g.get("client_id") or "").strip()),
+        "microsoft": bool(m.get("enabled") and (m.get("client_id") or "").strip()),
     }
 
 
@@ -140,44 +155,56 @@ def sso_config_save(data: dict, current_user: User = Depends(get_current_user)):
 
 @router.get("/login/google")
 def sso_login_google():
-    cfg = _load_config()
-    g = cfg.get("google", {})
-    if not g.get("enabled"):
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
-    state = secrets.token_urlsafe(32)
-    _set_code(f"state:{state}", {"provider": "google", "expires": time.time() + 600})
-    params = {
-        "client_id": g["client_id"],
-        "redirect_uri": f"{API_URL}/Auth/sso/callback/google",
-        "response_type": "code",
-        "scope": "openid email profile",
-        "state": state,
-        "access_type": "offline",
-        "prompt": "select_account",
-    }
-    url = "https://accounts.google.com/o/oauth2/v2/auth?" + "&".join(f"{k}={v}" for k, v in params.items())
-    return RedirectResponse(url)
+    try:
+        cfg = _load_config()
+        g = cfg.get("google", {})
+        client_id = (g.get("client_id") or "").strip()
+        if not g.get("enabled") or not client_id:
+            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
+        state = secrets.token_urlsafe(32)
+        _set_code(f"state:{state}", {"provider": "google", "expires": time.time() + 600})
+        params = {
+            "client_id": client_id,
+            "redirect_uri": f"{API_URL}/Auth/sso/callback/google",
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "access_type": "offline",
+            "prompt": "select_account",
+        }
+        url = "https://accounts.google.com/o/oauth2/v2/auth?" + "&".join(f"{k}={v}" for k, v in params.items())
+        return RedirectResponse(url)
+    except Exception as e:
+        import logging
+        logging.error(f"[sso_login_google] Error: {e}")
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
 
 
 @router.get("/login/microsoft")
 def sso_login_microsoft():
-    cfg = _load_config()
-    m = cfg.get("microsoft", {})
-    if not m.get("enabled"):
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
-    tenant = m.get("tenant", "common")
-    state = secrets.token_urlsafe(32)
-    _set_code(f"state:{state}", {"provider": "microsoft", "expires": time.time() + 600})
-    params = {
-        "client_id": m["client_id"],
-        "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
-        "response_type": "code",
-        "scope": "openid email profile",
-        "state": state,
-        "prompt": "select_account",
-    }
-    url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize?" + "&".join(f"{k}={v}" for k, v in params.items())
-    return RedirectResponse(url)
+    try:
+        cfg = _load_config()
+        m = cfg.get("microsoft", {})
+        client_id = (m.get("client_id") or "").strip()
+        if not m.get("enabled") or not client_id:
+            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
+        tenant = (m.get("tenant") or "").strip() or "common"
+        state = secrets.token_urlsafe(32)
+        _set_code(f"state:{state}", {"provider": "microsoft", "expires": time.time() + 600})
+        params = {
+            "client_id": client_id,
+            "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "prompt": "select_account",
+        }
+        url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize?" + "&".join(f"{k}={v}" for k, v in params.items())
+        return RedirectResponse(url)
+    except Exception as e:
+        import logging
+        logging.error(f"[sso_login_microsoft] Error: {e}")
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")l)
 
 
 @router.get("/callback/google")
