@@ -680,10 +680,22 @@ def _is_admin_or_hr(user: User) -> bool:
 
 @router.post("/upload-image")
 def upload_wish_image(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    import traceback, logging
+    logger = logging.getLogger(__name__)
+
     if not _is_admin_or_hr(current_user):
         raise HTTPException(status_code=403, detail="Admin or HR access required")
-    url = upload_file(file.file, file.filename or f"{uuid.uuid4()}.png", folder="festival_images")
-    return {"url": url}
+
+    try:
+        filename = file.filename or f"{uuid.uuid4()}.png"
+        logger.info(f"[upload-image] user={current_user.email} role={current_user.role} file={filename}")
+        url = upload_file(file.file, filename, folder="festival_images")
+        logger.info(f"[upload-image] success url={url}")
+        return {"url": url}
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error(f"[upload-image] FAILED: {exc}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(exc)}")
 
 
 # ── Email sending configuration (Microsoft 365 / Google) — shared by ──

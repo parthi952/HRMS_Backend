@@ -89,28 +89,45 @@
 
 import os
 import uuid
+import logging
 
-import cloudinary
-import cloudinary.uploader
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Cloudinary is used when credentials are present; otherwise files are saved
 # to local disk and served via the /uploads static route (see main.py).
 _CLOUDINARY_ENABLED = bool(os.getenv("CLOUDINARY_CLOUD_NAME"))
 
-if _CLOUDINARY_ENABLED:
-    cloudinary.config(
-        cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-        api_key=os.getenv("CLOUDINARY_API_KEY"),
-        api_secret=os.getenv("CLOUDINARY_API_SECRET"),
-        secure=True
+try:
+    import cloudinary
+    import cloudinary.uploader
+    if _CLOUDINARY_ENABLED:
+        cloudinary.config(
+            cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+            api_key=os.getenv("CLOUDINARY_API_KEY"),
+            api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+            secure=True
+        )
+except ImportError:
+    _CLOUDINARY_ENABLED = False
+    logger.warning("cloudinary package not installed — using local disk storage")
+
+# Resolve uploads directory: prefer UPLOADS_DIR env var, otherwise find it
+# relative to this file's location (FileUpload/../uploads).
+_env_uploads = os.getenv("UPLOADS_DIR", "")
+if _env_uploads:
+    UPLOADS_DIR = os.path.abspath(_env_uploads)
+else:
+    UPLOADS_DIR = os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
     )
 
-UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
-UPLOADS_DIR = os.path.abspath(UPLOADS_DIR)
 API_URL = os.getenv("API_URL", "https://hrm-api.tibostech.in")
+
+logger.info(f"[BlobFile] UPLOADS_DIR={UPLOADS_DIR}  API_URL={API_URL}  cloudinary={_CLOUDINARY_ENABLED}")
 
 
 # =========================
@@ -147,11 +164,20 @@ def upload_file(
         )
         return result["secure_url"]
 
+    # Local disk storage
     folder_dir = os.path.join(UPLOADS_DIR, folder)
     os.makedirs(folder_dir, exist_ok=True)
     dest_path = os.path.join(folder_dir, public_id)
+
+    logger.info(f"[BlobFile] saving to {dest_path}")
     with open(dest_path, "wb") as out:
-        out.write(file.read())
+        content = file.read()
+        if not content:
+            raise ValueError("Uploaded file is empty — nothing to save")
+        out.write(content)
+
+    logger.info(f"[BlobFile] saved {len(content)} bytes")
+
     # The app is created with root_path="/api", which Starlette applies to
     # mounted sub-apps (like the /uploads StaticFiles mount) even though
     # normal routes don't need it — so the public URL must include /api.
