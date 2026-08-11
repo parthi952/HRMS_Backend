@@ -61,12 +61,13 @@ def _prepare_html_and_inline_images(html: str):
             except Exception:
                 img_bytes = None
 
-        # Case 2: Local uploads folder (check multiple possible relative / server paths)
-        if img_bytes is None and ("/uploads/" in src or "uploads/" in src):
+        # Case 2: Local uploads folder (Direct candidate path lookup + Exhaustive os.walk recursive search)
+        if img_bytes is None:
             try:
-                rel_part = src.split("/uploads/")[-1] if "/uploads/" in src else src.split("uploads/")[-1]
+                rel_part = src.split("/uploads/")[-1] if "/uploads/" in src else src.split("uploads/")[-1] if "uploads/" in src else src
                 rel_part = rel_part.split("?")[0]
                 rel_part = urllib.parse.unquote(rel_part)
+                target_filename = os.path.basename(rel_part)
 
                 candidate_paths = [
                     os.path.normpath(os.path.join(UPLOADS_DIR, rel_part.replace("/", os.sep))),
@@ -75,25 +76,41 @@ def _prepare_html_and_inline_images(html: str):
                     os.path.normpath(os.path.join(os.getcwd(), rel_part.replace("/", os.sep))),
                 ]
 
-                for local_path in candidate_paths:
-                    if os.path.exists(local_path) and os.path.isfile(local_path):
-                        with open(local_path, "rb") as f:
-                            img_bytes = f.read()
-                        guessed_mime = mimetypes.guess_type(local_path)[0]
-                        if guessed_mime:
-                            content_type = guessed_mime
-                        filename = os.path.basename(local_path)
+                found_path = None
+                for p in candidate_paths:
+                    if os.path.exists(p) and os.path.isfile(p):
+                        found_path = p
                         break
+
+                if not found_path and target_filename and len(target_filename) > 3:
+                    search_dirs = [UPLOADS_DIR, os.path.join(os.getcwd(), "uploads"), os.getcwd()]
+                    for d in search_dirs:
+                        if os.path.exists(d):
+                            for root, _, files in os.walk(d):
+                                if target_filename in files:
+                                    found_path = os.path.join(root, target_filename)
+                                    break
+                        if found_path:
+                            break
+
+                if found_path:
+                    with open(found_path, "rb") as f:
+                        img_bytes = f.read()
+                    guessed_mime = mimetypes.guess_type(found_path)[0]
+                    if guessed_mime:
+                        content_type = guessed_mime
+                    filename = os.path.basename(found_path)
             except Exception:
                 img_bytes = None
 
-        # Case 3: Remote HTTP/HTTPS URL
+        # Case 3: Remote HTTP/HTTPS URL (fallback for external images or when local file not on disk)
         if img_bytes is None and (src.lower().startswith("http://") or src.lower().startswith("https://")):
             parsed = urllib.parse.urlparse(src)
             is_localhost = parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0")
             if not is_localhost:
                 try:
-                    with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+                    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                    with httpx.Client(timeout=15.0, follow_redirects=True, verify=False, headers=headers) as client:
                         resp = client.get(src)
                         if resp.status_code == 200:
                             img_bytes = resp.content
