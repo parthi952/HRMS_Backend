@@ -70,25 +70,41 @@ def ensure_default_users(db: Session):
     Ensure default Admin & HR accounts exist in the backend database.
     """
     try:
-        admin_user = db.query(User).filter(User.email == "admin@hrms.com").first()
+        from sqlalchemy import func
+        admin_user = db.query(User).filter(
+            (func.lower(User.email) == "admin@hrms.com") | (func.lower(User.username) == "admin")
+        ).first()
         if not admin_user:
             admin_user = User(
                 email="admin@hrms.com",
+                username="admin",
                 password=hash_password("password123"),
                 role="admin",
                 emp_id=None
             )
+            roles_util.set_roles(admin_user, ["admin"])
             db.add(admin_user)
+        else:
+            if not admin_user.username:
+                admin_user.username = "admin"
+            roles_util.set_roles(admin_user, ["admin"])
 
-        hr_user = db.query(User).filter(User.email == "hr@hrms.com").first()
+        hr_user = db.query(User).filter(
+            (func.lower(User.email) == "hr@hrms.com") | (func.lower(User.username) == "hr")
+        ).first()
         if not hr_user:
             hr_user = User(
                 email="hr@hrms.com",
+                username="hr",
                 password=hash_password("password123"),
                 role="hr",
                 emp_id=None
             )
+            roles_util.set_roles(hr_user, ["hr"])
             db.add(hr_user)
+        else:
+            if not hr_user.username:
+                hr_user.username = "hr"
 
         db.commit()
     except Exception as e:
@@ -110,11 +126,31 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     return user
     
     
-    # ✅ LOGIN ENDPOINT (POST)
+# ✅ LOGIN ENDPOINT (POST)
 @router.post("/login", response_model=Token)
 def login(login_data: UserLogin, db: Session = Depends(get_db)):
-    # Find user by email
-    user = db.query(User).filter(User.email == login_data.email).first()
+    ensure_default_users(db)
+
+    # Get identifier from username or email field
+    raw_id = (login_data.username or login_data.email or "").strip().lower()
+    if not raw_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username or email is required"
+        )
+
+    # Search user by username OR email (case-insensitive)
+    from sqlalchemy import func
+    user = db.query(User).filter(
+        (func.lower(User.email) == raw_id) | (func.lower(User.username) == raw_id)
+    ).first()
+
+    # Fallback: if identifier has no @, try matching local part of email
+    if not user and "@" not in raw_id:
+        user = db.query(User).filter(
+            func.lower(User.email).like(f"{raw_id}@%")
+        ).first()
+
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
