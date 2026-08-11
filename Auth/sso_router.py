@@ -781,3 +781,128 @@ def sso_exchange(data: dict):
         }
     finally:
         db.close()
+
+
+# ── Local Admin Management ───────────────────────────────────────────────────
+# These endpoints let admins create / list / update / delete local
+# (email + password) accounts from the SSO configuration UI without having
+# to run a one-off script on the server.
+
+_LOCAL_ROLES = ("admin", "hr", "manager", "employee")
+
+
+@router.get("/local-admins")
+def local_admins_list(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return all local (non-SSO) user accounts."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    users = db.query(User).order_by(User.id).all()
+    return [
+        {
+            "id": u.id,
+            "email": u.email,
+            "username": u.username or "",
+            "role": u.role,
+            "roles": roles_util.get_roles(u),
+            "emp_id": u.emp_id,
+            "name": u.employee.name if u.employee else (u.username or u.email.split("@")[0]),
+        }
+        for u in users
+    ]
+
+
+@router.post("/local-admins")
+def local_admins_create(data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Create a new local user account with email + password."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    email = (data.get("email") or "").strip().lower()
+    password = (data.get("password") or "").strip()
+    role = (data.get("role") or "admin").strip().lower()
+    username = (data.get("username") or "").strip() or email.split("@")[0]
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email is required")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if role not in _LOCAL_ROLES:
+        raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(_LOCAL_ROLES)}")
+
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"User with email '{email}' already exists")
+
+    from Auth.Encrypt import hash_password
+    import Auth.roles as _roles
+    new_user = User(
+        email=email,
+        username=username,
+        password=hash_password(password),
+        role=role,
+    )
+    _roles.set_roles(new_user, [role])
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {
+        "id": new_user.id,
+        "email": new_user.email,
+        "username": new_user.username,
+        "role": new_user.role,
+        "message": f"User '{email}' created successfully",
+    }
+
+
+@router.put("/local-admins/{user_id}")
+def local_admins_update(user_id: int, data: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Update role or reset password for a local user."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    import Auth.roles as _roles
+
+    if "role" in data:
+        new_role = (data["role"] or "").strip().lower()
+        if new_role not in _LOCAL_ROLES:
+            raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(_LOCAL_ROLES)}")
+        if user.id == current_user.id and new_role != "admin":
+            raise HTTPException(status_code=400, detail="You cannot remove your own admin role")
+        _roles.set_roles(user, [new_role])
+
+    if "password" in data:
+        new_pw = (data["password"] or "").strip()
+        if len(new_pw) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        from Auth.Encrypt import hash_password
+        user.password = hash_password(new_pw)
+
+    db.commit()
+    return {
+        "id": user.id,
+        "email": user.email,
+        "role": user.role,
+        "message": "User updated successfully",
+    }
+
+
+@router.delete("/local-admins/{user_id}")
+def local_admins_delete(user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete a local user account."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.delete(user)
+    db.commit()
+    return {"message": f"User '{user.email}' deleted"}
+
