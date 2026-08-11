@@ -672,10 +672,16 @@ def get_delivery_dashboard_stats(current_user: User = Depends(get_current_user),
     }
 
 
+def _is_admin_or_hr(user: User) -> bool:
+    role = (getattr(user, "role", "") or "").strip().lower()
+    roles = [r.strip().lower() for r in (getattr(user, "roles", "") or "").split(",") if r.strip()]
+    return role in ("admin", "hr") or "admin" in roles or "hr" in roles
+
+
 @router.post("/upload-image")
 def upload_wish_image(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+    if not _is_admin_or_hr(current_user):
+        raise HTTPException(status_code=403, detail="Admin or HR access required")
     url = upload_file(file.file, file.filename or f"{uuid.uuid4()}.png", folder="festival_images")
     return {"url": url}
 
