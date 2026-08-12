@@ -31,6 +31,12 @@ from Auth.sso_router import router as sso_router
 from ManagerPort.M_Leave import router as ManagerPort_Leave
 from Festival.FestivalRouter import router as festival_router, seed_default_festivals, seed_default_template, run_daily_festival_check
 from Festival.CommercialRouter import router as commercial_router
+from Festival.BirthdayService import (
+    BIRTHDAY_SEND_HOUR,
+    BIRTHDAY_SEND_MINUTE,
+    BIRTHDAY_TIMEZONE,
+    send_today_birthday_wishes,
+)
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler()
@@ -59,6 +65,11 @@ def _festival_job():
     asyncio.run(run_daily_festival_check())
 
 
+def _birthday_job():
+    import asyncio
+    asyncio.run(send_today_birthday_wishes())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
@@ -74,6 +85,18 @@ async def lifespan(app: FastAPI):
 
     if scheduler:
         scheduler.add_job(_festival_job, "interval", minutes=5, id="festival_check", replace_existing=True)
+        scheduler.add_job(
+            _birthday_job,
+            "cron",
+            hour=BIRTHDAY_SEND_HOUR,
+            minute=BIRTHDAY_SEND_MINUTE,
+            timezone=BIRTHDAY_TIMEZONE,
+            id="employee_birthday_wishes",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60 * 60,
+        )
         scheduler.start()
 
     yield

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, Text
+from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, Text, UniqueConstraint
 from datetime import datetime
 from database import Base
 
@@ -69,6 +69,32 @@ class WishSendLog(Base):
     status = Column(String, nullable=False)  # "sent" | "failed"
     error = Column(String, nullable=True)
     sent_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BirthdayWishLog(Base):
+    """One delivery claim per employee birthday.
+
+    The unique constraint is the final protection against duplicate emails when
+    more than one API worker starts the same scheduler job.
+    """
+    __tablename__ = "birthday_wish_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "emp_id",
+            "birthday_date",
+            name="uq_birthday_wish_employee_date",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    emp_id = Column(String, nullable=False, index=True)
+    employee_name = Column(String, nullable=True)
+    to_email = Column(String, nullable=False)
+    birthday_date = Column(Date, nullable=False, index=True)
+    status = Column(String, nullable=False, default="processing")
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    sent_at = Column(DateTime, nullable=True)
 
 
 class CommercialEmail(Base):

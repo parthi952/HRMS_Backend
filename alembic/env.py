@@ -22,6 +22,7 @@ import module.CustomIDDB
 import module.OptionDB
 import module.PayrollDB
 import module.payrollProvider
+import module.FestivalDB
 # Import any other models as needed
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

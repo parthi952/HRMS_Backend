@@ -552,6 +552,7 @@ def get_all_send_history(
 
     f_logs = db.query(FestivalDB.WishSendLog).order_by(FestivalDB.WishSendLog.sent_at.desc()).limit(1000).all()
     c_logs = db.query(FestivalDB.CommercialSendLog).order_by(FestivalDB.CommercialSendLog.sent_at.desc()).limit(1000).all()
+    b_logs = db.query(FestivalDB.BirthdayWishLog).order_by(FestivalDB.BirthdayWishLog.created_at.desc()).limit(1000).all()
 
     combined = []
     for l in f_logs:
@@ -580,6 +581,21 @@ def get_all_send_history(
             "status": l.status,
             "error": l.error or None,
             "sent_at": l.sent_at.isoformat() if l.sent_at else "",
+        })
+
+    for l in b_logs:
+        event_time = l.sent_at or l.created_at
+        combined.append({
+            "id": f"b_{l.id}",
+            "campaign_type": "Birthday Wish",
+            "campaign_name": "Employee Birthday Wish",
+            "recipient_name": l.employee_name or "",
+            "to_email": l.to_email,
+            "from_email": "",
+            "cc_emails": "",
+            "status": l.status,
+            "error": l.error or None,
+            "sent_at": event_time.isoformat() if event_time else "",
         })
 
     combined.sort(key=lambda x: x["sent_at"] or "", reverse=True)
@@ -628,14 +644,17 @@ def get_delivery_dashboard_stats(current_user: User = Depends(get_current_user),
 
     f_logs = db.query(FestivalDB.WishSendLog).order_by(FestivalDB.WishSendLog.sent_at.desc()).limit(1000).all()
     c_logs = db.query(FestivalDB.CommercialSendLog).order_by(FestivalDB.CommercialSendLog.sent_at.desc()).limit(1000).all()
+    b_logs = db.query(FestivalDB.BirthdayWishLog).order_by(FestivalDB.BirthdayWishLog.created_at.desc()).limit(1000).all()
 
-    total_triggered = len(f_logs) + len(c_logs)
+    total_triggered = len(f_logs) + len(c_logs) + len(b_logs)
     delivered_f = sum(1 for l in f_logs if l.status == "sent")
     delivered_c = sum(1 for l in c_logs if l.status == "sent")
-    total_delivered = delivered_f + delivered_c
+    delivered_b = sum(1 for l in b_logs if l.status == "sent")
+    total_delivered = delivered_f + delivered_c + delivered_b
     failed_f = sum(1 for l in f_logs if l.status == "failed")
     failed_c = sum(1 for l in c_logs if l.status == "failed")
-    total_failed = failed_f + failed_c
+    failed_b = sum(1 for l in b_logs if l.status == "failed")
+    total_failed = failed_f + failed_c + failed_b
 
     success_rate = round((total_delivered / total_triggered * 100)) if total_triggered > 0 else 100
 
@@ -661,6 +680,7 @@ def get_delivery_dashboard_stats(current_user: User = Depends(get_current_user),
         "campaign_breakdown": {
             "festival_wishes": {"total": len(f_logs), "delivered": delivered_f, "failed": failed_f},
             "commercial_emails": {"total": len(c_logs), "delivered": delivered_c, "failed": failed_c},
+            "birthday_wishes": {"total": len(b_logs), "delivered": delivered_b, "failed": failed_b},
         },
         "audience_stats": {
             "system_employees": active_employees,
