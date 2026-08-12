@@ -4,8 +4,11 @@ Config stored as JSON on disk, temporary codes in a shared file store.
 """
 import os
 import json
+import logging
 import secrets
+import tempfile
 import time
+from urllib.parse import urlencode
 try:
     import fcntl
 except ImportError:
@@ -23,8 +26,15 @@ from Auth import roles as roles_util
 
 router = APIRouter(prefix="/Auth/sso", tags=["SSO"])
 
+logger = logging.getLogger(__name__)
+
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sso_config.json")
-CODES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sso_codes.json")
+# OAuth state is runtime data, so it must not live in the application source
+# directory. Deployed containers commonly mount that directory read-only.
+CODES_PATH = os.getenv(
+    "SSO_CODES_PATH",
+    os.path.join(tempfile.gettempdir(), "hrms_sso_codes.json"),
+)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://hrm.tibostech.in")
 API_URL = os.getenv("API_URL", "https://hrm-api.tibostech.in")
 
@@ -32,8 +42,13 @@ API_URL = os.getenv("API_URL", "https://hrm-api.tibostech.in")
 def _load_config() -> dict:
     if not os.path.exists(CONFIG_PATH):
         return {"google": {"enabled": False}, "microsoft": {"enabled": False}}
-    with open(CONFIG_PATH, "r") as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            cfg = json.load(f)
+        return cfg if isinstance(cfg, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Unable to read SSO configuration from %s", CONFIG_PATH)
+        return {"google": {"enabled": False}, "microsoft": {"enabled": False}}
 
 
 def _save_config(cfg: dict):
@@ -45,6 +60,9 @@ _IN_MEMORY_CODES = {}
 def _with_codes_lock(mutate_fn):
     global _IN_MEMORY_CODES
     try:
+        codes_dir = os.path.dirname(CODES_PATH)
+        if codes_dir:
+            os.makedirs(codes_dir, exist_ok=True)
         if not os.path.exists(CODES_PATH):
             with open(CODES_PATH, "w") as f:
                 json.dump({}, f)
@@ -155,64 +173,68 @@ def sso_config_save(data: dict, current_user: User = Depends(get_current_user)):
 
 @router.get("/login/google")
 def sso_login_google():
+    cfg = _load_config()
+    g = cfg.get("google", {})
+    if not g.get("enabled"):
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
+    if not g.get("client_id") or not g.get("client_secret"):
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_misconfigured")
+    state = secrets.token_urlsafe(32)
     try:
-        cfg = _load_config()
-        g = cfg.get("google", {})
-        client_id = (g.get("client_id") or "").strip()
-        if not g.get("enabled") or not client_id:
-            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
-        state = secrets.token_urlsafe(32)
         _set_code(f"state:{state}", {"provider": "google", "expires": time.time() + 600})
-        params = {
-            "client_id": client_id,
-            "redirect_uri": f"{API_URL}/Auth/sso/callback/google",
-            "response_type": "code",
-            "scope": "openid email profile",
-            "state": state,
-            "access_type": "offline",
-            "prompt": "select_account",
-        }
-        url = "https://accounts.google.com/o/oauth2/v2/auth?" + "&".join(f"{k}={v}" for k, v in params.items())
-        return RedirectResponse(url)
-    except Exception as e:
-        import logging
-        logging.error(f"[sso_login_google] Error: {e}")
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
+    except OSError:
+        logger.exception("Unable to persist Google OAuth state at %s", CODES_PATH)
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
+    params = {
+        "client_id": g["client_id"],
+        "redirect_uri": f"{API_URL}/Auth/sso/callback/google",
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "offline",
+        "prompt": "select_account",
+    }
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+    return RedirectResponse(url)
 
 
 @router.get("/login/microsoft")
 def sso_login_microsoft():
+    cfg = _load_config()
+    m = cfg.get("microsoft", {})
+    if not m.get("enabled"):
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
+    if not m.get("client_id") or not m.get("client_secret"):
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_misconfigured")
+    tenant = m.get("tenant", "common")
+    state = secrets.token_urlsafe(32)
     try:
-        cfg = _load_config()
-        m = cfg.get("microsoft", {})
-        client_id = (m.get("client_id") or "").strip()
-        if not m.get("enabled") or not client_id:
-            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_disabled")
-        tenant = (m.get("tenant") or "").strip() or "common"
-        state = secrets.token_urlsafe(32)
         _set_code(f"state:{state}", {"provider": "microsoft", "expires": time.time() + 600})
-        params = {
-            "client_id": client_id,
-            "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
-            "response_type": "code",
-            "scope": "openid email profile",
-            "state": state,
-            "prompt": "select_account",
-        }
-        url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize?" + "&".join(f"{k}={v}" for k, v in params.items())
-        return RedirectResponse(url)
-    except Exception as e:
-        import logging
-        logging.error(f"[sso_login_microsoft] Error: {e}")
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")l)
+    except OSError:
+        logger.exception("Unable to persist Microsoft OAuth state at %s", CODES_PATH)
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
+    params = {
+        "client_id": m["client_id"],
+        "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
+        "response_type": "code",
+        "scope": "openid email profile User.Read",
+        "state": state,
+        "prompt": "select_account",
+    }
+    url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize?" + urlencode(params)
+    return RedirectResponse(url)
 
 
 @router.get("/callback/google")
 async def sso_callback_google(code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
-    _cleanup_codes()
-    state_data = _pop_code(f"state:{state}")
+    try:
+        _cleanup_codes()
+        state_data = _pop_code(f"state:{state}")
+    except OSError:
+        logger.exception("Unable to read Google OAuth state from %s", CODES_PATH)
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
     if not state_data or state_data["provider"] != "google":
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_state")
 
@@ -246,8 +268,12 @@ async def sso_callback_google(code: str = "", state: str = "", error: str = ""):
 async def sso_callback_microsoft(code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
-    _cleanup_codes()
-    state_data = _pop_code(f"state:{state}")
+    try:
+        _cleanup_codes()
+        state_data = _pop_code(f"state:{state}")
+    except OSError:
+        logger.exception("Unable to read Microsoft OAuth state from %s", CODES_PATH)
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
     if not state_data or state_data["provider"] != "microsoft":
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_state")
 
@@ -262,7 +288,7 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
                 "client_secret": m["client_secret"],
                 "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
                 "grant_type": "authorization_code",
-                "scope": "openid email profile",
+                "scope": "openid email profile User.Read",
             })
             tokens = token_resp.json()
             if "access_token" not in tokens:
@@ -287,7 +313,11 @@ def _finish_sso(email: str):
         if not user:
             return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=user_not_provisioned")
         sso_code = secrets.token_urlsafe(48)
-        _set_code(sso_code, {"email": email, "expires": time.time() + 120})
+        try:
+            _set_code(sso_code, {"email": email, "expires": time.time() + 120})
+        except OSError:
+            logger.exception("Unable to persist one-time SSO code at %s", CODES_PATH)
+            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_code={sso_code}")
     finally:
         db.close()
@@ -778,9 +808,13 @@ def sso_update_role(user_id: int, data: dict, current_user: User = Depends(get_c
 
 @router.post("/exchange")
 def sso_exchange(data: dict):
-    _cleanup_codes()
-    code = data.get("code", "")
-    code_data = _pop_code(code)
+    try:
+        _cleanup_codes()
+        code = data.get("code", "")
+        code_data = _pop_code(code)
+    except OSError:
+        logger.exception("Unable to exchange one-time SSO code from %s", CODES_PATH)
+        raise HTTPException(status_code=503, detail="SSO state storage is unavailable")
     if not code_data or "email" not in code_data:
         raise HTTPException(status_code=400, detail="Invalid or expired SSO code")
     if code_data["expires"] < time.time():

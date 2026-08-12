@@ -47,7 +47,7 @@ import module.CandidateDB as CandidateDB
 import module.RequirementDB as RequirementDB
 import module.ATSScoreDB as ATSScoreDB
 import module.FestivalDB as FestivalDB
-from database import engine, get_db
+from database import Base, engine, get_db
 
 
 import module.OffBoardDB as OffBoardDB
@@ -62,6 +62,9 @@ def _festival_job():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
+    # All router/model modules have been imported by this point, so foreign-key
+    # targets are registered before SQLAlchemy sorts and creates the tables.
+    Base.metadata.create_all(bind=engine)
     EmplyeeDB.Base.metadata.create_all(bind=engine)
     ATSScoreDB.Base.metadata.create_all(bind=engine)
     OffBoardDB.Base.metadata.create_all(bind=engine)

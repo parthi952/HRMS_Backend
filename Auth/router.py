@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from database import get_db, engine, Base
+from database import get_db, engine
 
 # Absolute imports starting from root package
 from Auth.models import User
@@ -9,9 +10,6 @@ from Auth.Schema import UserCreate, UserLogin, Token, TokenRefreshRequest, UserR
 from Auth.Token import create_access_token, create_refresh_token, verify_token, verify_refresh_token
 from Auth.Encrypt import hash_password, verify_password
 from Auth import roles as roles_util
-
-# Ensure table exists
-Base.metadata.create_all(bind=engine)
 
 # create_all never alters an existing table, so new columns need adding by hand.
 try:
@@ -150,7 +148,6 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         user = db.query(User).filter(
             func.lower(User.email).like(f"{raw_id}@%")
         ).first()
-
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

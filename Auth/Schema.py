@@ -1,5 +1,5 @@
 from typing import clear_overloads, List
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import Optional
 
 class UserCreate(BaseModel):
@@ -26,9 +26,22 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    username: Optional[str] = None
+    # Older clients submit `email`; some newer clients label the same value as
+    # `username`. Accept both so a frontend/backend version mismatch cannot turn
+    # a login attempt into a server error.
     email: Optional[str] = None
+    username: Optional[str] = None
     password: str
+
+    @model_validator(mode="after")
+    def validate_identifier(self):
+        if not self.email and not self.username:
+            raise ValueError("Email or username is required")
+        if self.email:
+            self.email = self.email.strip().lower()
+        if self.username:
+            self.username = self.username.strip()
+        return self
 
 
 class Token(BaseModel):
