@@ -26,3 +26,4 @@ weasyprint
 cloudinary
 psycopg[binary]
 apscheduler
+beautifulsoup4
