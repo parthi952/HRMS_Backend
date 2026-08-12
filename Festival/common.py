@@ -1,0 +1,199 @@
+"""Shared helpers used by both Festival Wishes and Commercial Emails —
+recipient resolution, template lookup, and HTML rendering are identical
+for both, only the source data (a FestivalWish vs a CommercialEmail row)
+differs."""
+from sqlalchemy.orm import Session
+import module.FestivalDB as FestivalDB
+import module.EmplyeeDB as EmplyeeDB
+
+
+def get_recipients(audience: str, db: Session, cc_emails_str: str = "", to_emails_str: str = ""):
+    audience = audience or "employees"
+    recipients = []
+    seen = set()
+
+    # 1. Fetch audience recipients (Employees / Customers / Both)
+    if audience in ("employees", "both"):
+        emp_rows = db.query(
+            EmplyeeDB.Employee.name,
+            EmplyeeDB.Employee.email,
+            EmplyeeDB.Employee.Status
+        ).filter(
+            EmplyeeDB.Employee.email.isnot(None),
+            EmplyeeDB.Employee.email != ""
+        ).all()
+        for name, email, status in emp_rows:
+            if not email or not email.strip():
+                continue
+            clean_email = email.strip()
+            # Status check: include if Status is Active/active/null or not Explicitly Inactive/Terminated
+            status_str = (status or "Active").strip().lower()
+            if status_str not in ("inactive", "terminated", "resigned", "disabled") and clean_email.lower() not in seen:
+                seen.add(clean_email.lower())
+                recipients.append((name or "Team Member", clean_email))
+
+        # Also include manual contacts tagged for employee audience ("employee" or "both")
+        emp_contact_rows = db.query(FestivalDB.WishContact.name, FestivalDB.WishContact.email).filter(
+            FestivalDB.WishContact.enabled == True,
+            FestivalDB.WishContact.email.isnot(None),
+            FestivalDB.WishContact.email != "",
+            FestivalDB.WishContact.contact_type.in_(["employee", "both"])
+        ).all()
+        for name, email in emp_contact_rows:
+            if not email or not email.strip():
+                continue
+            clean_email = email.strip()
+            if clean_email.lower() not in seen:
+                seen.add(clean_email.lower())
+                recipients.append((name or "Team Member", clean_email))
+
+    if audience in ("customers", "both"):
+        from sqlalchemy import or_
+        cust_rows = db.query(FestivalDB.WishContact.name, FestivalDB.WishContact.email).filter(
+            FestivalDB.WishContact.enabled == True,
+            FestivalDB.WishContact.email.isnot(None),
+            FestivalDB.WishContact.email != "",
+            or_(
+                FestivalDB.WishContact.contact_type.in_(["customer", "both"]),
+                FestivalDB.WishContact.contact_type.is_(None)
+            )
+        ).all()
+        for name, email in cust_rows:
+            if not email or not email.strip():
+                continue
+            clean_email = email.strip()
+            if clean_email.lower() not in seen:
+                seen.add(clean_email.lower())
+                recipients.append((name or "Valued Customer", clean_email))
+
+    # 2. ALSO include any specific additional recipient emails provided in the "Specific Recipients" box!
+    if to_emails_str and to_emails_str.strip():
+        for item in to_emails_str.split(","):
+            item = item.strip()
+            if item and "@" in item and item.lower() not in seen:
+                seen.add(item.lower())
+                recipients.append(("Valued Recipient", item))
+
+    # 3. Fallback to CC Emails if no recipients were found in DB tables or specific box
+    if not recipients and cc_emails_str:
+        cc_list = [c.strip() for c in cc_emails_str.split(",") if c.strip() and "@" in c]
+        for c_email in cc_list:
+            if c_email.lower() not in seen:
+                seen.add(c_email.lower())
+                recipients.append(("Valued Recipient", c_email))
+
+    return recipients
+
+
+def get_template(template_id, db: Session):
+    template = None
+    if template_id:
+        template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.id == template_id).first()
+    if not template:
+        template = db.query(FestivalDB.WishTemplate).filter(FestivalDB.WishTemplate.is_default == True).first()
+    if not template:
+        template = db.query(FestivalDB.WishTemplate).order_by(FestivalDB.WishTemplate.id).first()
+    return template
+
+
+def merge_message(message: str, name: str) -> str:
+    """Simple mail-merge: replaces {{name}} / {name} placeholders with the recipient's name."""
+    return (
+        message
+        .replace("{{name}}", name).replace("{{Name}}", name)
+        .replace("{name}", name).replace("{Name}", name)
+    )
+
+
+import re
+
+
+def _center_and_format_images(html_content: str) -> str:
+    """Give body images sane email defaults without clobbering choices the user
+    made in the editor. Any size or alignment already set on the tag wins — we
+    only fill in what is missing."""
+    if not html_content or "<img" not in html_content.lower():
+        return html_content or ""
+
+    def replace_img(match):
+        img_tag = match.group(0)
+        style_match = re.search(r'style="([^"]*)"', img_tag)
+        style = style_match.group(1) if style_match else ""
+        style_lc = style.lower()
+
+        # The editor writes explicit margins when the user picks left/center/right
+        user_aligned = "margin-left" in style_lc or "margin-right" in style_lc
+
+        additions = []
+        if "max-width" not in style_lc:
+            additions.append("max-width:100%")
+        if "height" not in style_lc:
+            additions.append("height:auto")
+        if "border-radius" not in style_lc:
+            additions.append("border-radius:12px")
+        if "display" not in style_lc:
+            additions.append("display:block")
+        if not user_aligned and "margin" not in style_lc:
+            additions.append("margin:12px auto")
+
+        new_style = ";".join([s for s in [style.rstrip("; ")] if s] + additions)
+        if style_match:
+            img_tag = img_tag[:style_match.start()] + f'style="{new_style}"' + img_tag[style_match.end():]
+        else:
+            img_tag = img_tag.replace("<img ", f'<img style="{new_style}" ', 1)
+
+        if user_aligned:
+            # Alignment is carried by the image's own margins; an extra centering
+            # wrapper would fight it in clients that honour text-align.
+            return img_tag
+        return f'<div align="center" style="text-align:center;margin:12px 0;">{img_tag}</div>'
+
+    return re.sub(r'<img\s+[^>]*>', replace_img, html_content)
+
+
+def build_email_html(title: str, template, message: str) -> str:
+    formatted_message = _center_and_format_images(message)
+    if not template:
+        return formatted_message
+    header = template.header_html.replace("{{festival_name}}", title).replace("{festival_name}", title)
+    if template.logo_url:
+        align_margin = {
+            "left": "margin:0 auto 10pt 0;",
+            "right": "margin:0 0 10pt auto;",
+        }.get(template.logo_align or "center", "margin:0 auto 10pt auto;")
+        logo_html = f'<img src="{template.logo_url}" alt="" width="{template.logo_width or 120}" style="display:block;{align_margin}max-width:100%;" />'
+        header = logo_html + header
+    highlight_block = ""
+    if template.highlight_html:
+        highlight_block = f"""
+  <tr>
+    <td style="padding:11.25pt 26.25pt 18.75pt;">
+      <table cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+        <tr>
+          <td style="background-color:{template.highlight_bg_color};padding:15pt 18.75pt;color:#000;text-align:center;">
+            {template.highlight_html}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>"""
+    return f"""
+<table cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;width:525pt;max-width:100%;font-family:Aptos, Calibri, Helvetica, sans-serif;">
+  <tr>
+    <td style="background-color:{template.header_bg_color};padding:22.5pt 15pt 18.75pt;text-align:center;color:#000;">
+      {header}
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:26.25pt 26.25pt 11.25pt;">
+      <div style="line-height:1.38;margin:0 0 8pt;font-size:11pt;color:#000;text-align:center;">{formatted_message}</div>
+    </td>
+  </tr>{highlight_block}
+  <tr><td style="background-color:#E8EDF4;height:0.75pt;">&nbsp;</td></tr>
+  <tr>
+    <td style="background-color:{template.footer_bg_color};padding:26.25pt;">
+      {template.footer_html}
+    </td>
+  </tr>
+</table>
+""".strip()

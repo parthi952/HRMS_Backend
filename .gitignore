@@ -1,0 +1,43 @@
+# Secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+Auth/sso_config.json
+Auth/sso_codes.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Runtime data — never commit employee or authentication data
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+ATS_System/Document/
+logs/
+*.log
+
+# Credentials and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build and temporary output
+dist/
+build/
+tmp/
+temp/

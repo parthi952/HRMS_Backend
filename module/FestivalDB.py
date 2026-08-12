@@ -1,0 +1,151 @@
+from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, Text, UniqueConstraint
+from datetime import datetime
+from database import Base
+
+
+class FestivalWish(Base):
+    __tablename__ = "festival_wishes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    date = Column(Date, nullable=False)
+    message = Column(Text, nullable=False)
+    recurs_yearly = Column(Boolean, default=True)
+    enabled = Column(Boolean, default=True)
+    last_email_sent_year = Column(Integer, nullable=True)
+    audience = Column(String, default="employees")  # "employees" | "customers" | "both"
+    to_emails = Column(String, nullable=True)  # comma-separated custom specified recipient emails
+    cc_emails = Column(String, nullable=True)  # comma-separated
+    from_email = Column(String, nullable=True)  # overrides GRAPH_SENDER_EMAIL if set
+    template_id = Column(Integer, nullable=True)  # FK to wish_templates.id (nullable — falls back to the default template)
+    send_time = Column(String, default="09:00")  # HH:MM format e.g. "09:00"
+
+
+class WishTemplate(Base):
+    __tablename__ = "wish_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    company_name = Column(String, nullable=True)
+    company_website = Column(String, nullable=True)
+    company_email = Column(String, nullable=True)
+    company_phone = Column(String, nullable=True)
+    company_tagline = Column(String, nullable=True)
+    header_html = Column(Text, nullable=False)      # supports {{festival_name}}
+    header_bg_color = Column(String, default="#9EE4FF")
+    highlight_html = Column(Text, nullable=True)     # the "from us" callout box
+    highlight_bg_color = Column(String, default="#9EE4FF")
+    footer_html = Column(Text, nullable=False)       # contact details / sign-off
+    footer_bg_color = Column(String, default="#FAFBFD")
+    is_default = Column(Boolean, default=False)
+    logo_url = Column(String, nullable=True)
+    logo_width = Column(Integer, default=120)   # px
+    logo_align = Column(String, default="center")  # "left" | "center" | "right"
+
+
+
+class WishContact(Base):
+    __tablename__ = "wish_contacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    company_name = Column(String, nullable=True)
+    contact_type = Column(String, default="customer")  # "customer" | "employee" | "both"
+    enabled = Column(Boolean, default=True)
+
+
+
+class WishSendLog(Base):
+    __tablename__ = "wish_send_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    wish_id = Column(Integer, nullable=False)
+    wish_name = Column(String, nullable=False)
+    recipient_name = Column(String, nullable=True)
+    to_email = Column(String, nullable=False)
+    cc_emails = Column(String, nullable=True)
+    from_email = Column(String, nullable=True)
+    status = Column(String, nullable=False)  # "sent" | "failed"
+    error = Column(String, nullable=True)
+    sent_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BirthdayWishLog(Base):
+    """One delivery claim per employee birthday.
+
+    The unique constraint is the final protection against duplicate emails when
+    more than one API worker starts the same scheduler job.
+    """
+    __tablename__ = "birthday_wish_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "emp_id",
+            "birthday_date",
+            name="uq_birthday_wish_employee_date",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    emp_id = Column(String, nullable=False, index=True)
+    employee_name = Column(String, nullable=True)
+    to_email = Column(String, nullable=False)
+    birthday_date = Column(Date, nullable=False, index=True)
+    status = Column(String, nullable=False, default="processing")
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    sent_at = Column(DateTime, nullable=True)
+
+
+class CommercialEmail(Base):
+    """One-off / ad-hoc commercial email campaigns — same send pipeline as
+    Festival Wishes (audience, template, CC, from-email, mail-merge) but
+    with no date or yearly recurrence."""
+    __tablename__ = "commercial_emails"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    audience = Column(String, default="employees")  # "employees" | "customers" | "both"
+    to_emails = Column(String, nullable=True)  # comma-separated custom specified recipient emails
+    cc_emails = Column(String, nullable=True)
+    from_email = Column(String, nullable=True)
+    template_id = Column(Integer, nullable=True)
+    no_template = Column(Boolean, default=False)  # send raw body, no header/footer wrapper
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CommercialSendLog(Base):
+    __tablename__ = "commercial_send_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email_id = Column(Integer, nullable=False)
+    email_name = Column(String, nullable=False)
+    recipient_name = Column(String, nullable=True)
+    to_email = Column(String, nullable=False)
+    cc_emails = Column(String, nullable=True)
+    from_email = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    error = Column(String, nullable=True)
+    sent_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EmailProviderConfig(Base):
+    """Singleton-style row (id=1) holding which OAuth provider sends mail
+    and its credentials, editable from Celebrations > Email Settings
+    instead of server env vars."""
+    __tablename__ = "email_provider_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String, nullable=True)  # "microsoft" | "google"
+    ms_client_id = Column(String, nullable=True)
+    ms_client_secret = Column(String, nullable=True)
+    ms_tenant = Column(String, default="common")
+    ms_sender_email = Column(String, nullable=True)
+    google_service_account_json = Column(Text, nullable=True)
+    google_sender_email = Column(String, nullable=True)
+    batch_size = Column(Integer, default=30)       # e.g. 30 emails per batch shot
+    delay_seconds = Column(Integer, default=0)     # e.g. 300 seconds (5 mins) pause between batches
+
