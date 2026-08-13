@@ -27,3 +27,4 @@ cloudinary
 psycopg[binary]
 apscheduler
 beautifulsoup4
+openpyxl

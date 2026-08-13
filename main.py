@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 from Auth import router as Auth
 from EmployeePort.Atteddance.Attendance import router as employee_attendance_router
 from EmployeePort.ActiveBatch import router as active_batch_router
+from EmployeePort.EmployeeBulkRouter import router as employee_bulk_router
 from routers.PdfRouter import router as pdf_router
 from DailyTaskReport.Routere import router as daily_tasks_router
 from UserPassword import PortAccsesRoute as PortAccses
@@ -31,6 +32,7 @@ from Auth.sso_router import router as sso_router
 from ManagerPort.M_Leave import router as ManagerPort_Leave
 from Festival.FestivalRouter import router as festival_router, seed_default_festivals, seed_default_template, run_daily_festival_check
 from Festival.CommercialRouter import router as commercial_router
+from Festival.BirthdayRouter import router as birthday_router
 from Festival.BirthdayService import (
     BIRTHDAY_SEND_HOUR,
     BIRTHDAY_SEND_MINUTE,
@@ -134,6 +136,7 @@ app.include_router(Auth.router)
 
 # emmployee router
 app.include_router(employee.router)
+app.include_router(employee_bulk_router)
 
 # attendance router
 app.include_router(att.router)
@@ -173,3 +176,4 @@ app.include_router(OffBoard.router)
 app.include_router(Compat.router)
 app.include_router(festival_router)
 app.include_router(commercial_router)
+app.include_router(birthday_router)
