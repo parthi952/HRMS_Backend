@@ -71,6 +71,17 @@ class WishSendLog(Base):
     sent_at = Column(DateTime, default=datetime.utcnow)
 
 
+class BirthdayWishSettings(Base):
+    """Editable content used by the automatic employee birthday scheduler."""
+    __tablename__ = "birthday_wish_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    subject_template = Column(String, nullable=False)
+    message_html = Column(Text, nullable=False)
+    template_id = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class BirthdayWishLog(Base):
     """One delivery claim per employee birthday.
 

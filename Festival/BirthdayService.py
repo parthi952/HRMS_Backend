@@ -28,6 +28,14 @@ BIRTHDAY_SEND_MINUTE = int(os.getenv("BIRTHDAY_SEND_MINUTE", "0"))
 
 _INACTIVE_STATUSES = {"inactive", "terminated", "resigned", "disabled"}
 
+DEFAULT_BIRTHDAY_SUBJECT = "Happy Birthday, {{name}}!"
+DEFAULT_BIRTHDAY_MESSAGE_HTML = (
+    "Dear {{name}},<br/><br/>"
+    "Wishing you a very Happy Birthday! May the year ahead bring you "
+    "happiness, success, good health, and many wonderful moments."
+    "<br/><br/>Best wishes from the entire TIBOS team."
+)
+
 
 def today_in_birthday_timezone() -> date:
     """Return the calendar date used by birthday matching."""
@@ -71,6 +79,35 @@ def _eligible_employees(db: Session, target_date: date):
     ]
 
 
+def get_or_create_birthday_settings(db: Session) -> FestivalDB.BirthdayWishSettings:
+    settings = (
+        db.query(FestivalDB.BirthdayWishSettings)
+        .filter(FestivalDB.BirthdayWishSettings.id == 1)
+        .first()
+    )
+    if settings:
+        return settings
+    settings = FestivalDB.BirthdayWishSettings(
+        id=1,
+        subject_template=DEFAULT_BIRTHDAY_SUBJECT,
+        message_html=DEFAULT_BIRTHDAY_MESSAGE_HTML,
+        template_id=None,
+    )
+    db.add(settings)
+    try:
+        db.commit()
+        db.refresh(settings)
+        return settings
+    except IntegrityError:
+        # Another Gunicorn worker created the singleton first.
+        db.rollback()
+        return (
+            db.query(FestivalDB.BirthdayWishSettings)
+            .filter(FestivalDB.BirthdayWishSettings.id == 1)
+            .one()
+        )
+
+
 def _claim_delivery(
     db: Session,
     employee: EmployeeDB.Employee,
@@ -98,15 +135,15 @@ def _claim_delivery(
         return None
 
 
-def _birthday_html(name: str, template) -> str:
+def _birthday_html(name: str, template, message_html: str = DEFAULT_BIRTHDAY_MESSAGE_HTML) -> str:
     safe_name = html.escape(name)
-    message = (
-        f"Dear {safe_name},<br/><br/>"
-        "Wishing you a very Happy Birthday! May the year ahead bring you "
-        "happiness, success, good health, and many wonderful moments."
-        "<br/><br/>Best wishes from the entire TIBOS team."
-    )
+    message = common.merge_message(message_html or DEFAULT_BIRTHDAY_MESSAGE_HTML, safe_name)
     return common.build_email_html("Happy Birthday", template, message)
+
+
+def _birthday_subject(name: str, subject_template: str = DEFAULT_BIRTHDAY_SUBJECT) -> str:
+    subject = common.merge_message(subject_template or DEFAULT_BIRTHDAY_SUBJECT, name)
+    return " ".join(subject.split()) or f"Happy Birthday, {name}!"
 
 
 async def send_today_birthday_wishes(
@@ -138,7 +175,8 @@ async def send_today_birthday_wishes(
         if not employees:
             return result
 
-        template = common.get_template(None, session)
+        settings = get_or_create_birthday_settings(session)
+        template = common.get_template(settings.template_id, session)
         if not template:
             logger.error("Birthday wishes skipped: no email template configured")
             result["failed"] = len(employees)
@@ -154,8 +192,8 @@ async def send_today_birthday_wishes(
             try:
                 ok, error = await sender(
                     session,
-                    f"Happy Birthday, {name}!",
-                    _birthday_html(name, template),
+                    _birthday_subject(name, settings.subject_template),
+                    _birthday_html(name, template, settings.message_html),
                     employee.email.strip(),
                     [],
                     None,

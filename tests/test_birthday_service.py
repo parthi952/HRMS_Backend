@@ -12,6 +12,8 @@ import module.PayrollDB  # Registers the Employee.payroll relationship.
 import module.EmplyeeDB as EmployeeDB
 import module.FestivalDB as FestivalDB
 from Festival.BirthdayService import (
+    DEFAULT_BIRTHDAY_MESSAGE_HTML,
+    DEFAULT_BIRTHDAY_SUBJECT,
     has_birthday_on,
     is_active_employee,
     send_today_birthday_wishes,
@@ -137,6 +139,45 @@ class BirthdayServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["duplicates"], 1)
         self.assertEqual(len(deliveries), 1)
         self.assertEqual(self.db.query(FestivalDB.BirthdayWishLog).count(), 1)
+
+    async def test_uses_saved_birthday_content_and_selected_layout(self):
+        target = date(2026, 8, 12)
+        employee = self.add_employee("EMP004", target, name="Custom Employee")
+        second_template = FestivalDB.WishTemplate(
+            name="Birthday Pink",
+            header_html="<h1>Selected: {{festival_name}}</h1>",
+            footer_html="<p>Birthday footer</p>",
+            is_default=False,
+        )
+        self.db.add(second_template)
+        self.db.flush()
+        self.db.add(FestivalDB.BirthdayWishSettings(
+            id=1,
+            subject_template="A special day for {{name}}",
+            message_html="<p>Dear {{name}}, custom birthday message.</p>",
+            template_id=second_template.id,
+        ))
+        self.db.commit()
+        deliveries = []
+
+        async def fake_send(db, subject, body, to_email, cc_list, sender_override):
+            deliveries.append((subject, body, to_email))
+            return True, None
+
+        await send_today_birthday_wishes(
+            target_date=target,
+            db=self.db,
+            send_email_fn=fake_send,
+        )
+
+        self.assertEqual(deliveries[0][0], "A special day for Custom Employee")
+        self.assertIn("custom birthday message", deliveries[0][1])
+        self.assertIn("Selected: Happy Birthday", deliveries[0][1])
+        self.assertEqual(deliveries[0][2], employee.email)
+
+    def test_default_content_matches_existing_production_wording(self):
+        self.assertEqual(DEFAULT_BIRTHDAY_SUBJECT, "Happy Birthday, {{name}}!")
+        self.assertIn("Wishing you a very Happy Birthday!", DEFAULT_BIRTHDAY_MESSAGE_HTML)
 
     async def test_delivery_failure_is_recorded(self):
         target = date(2026, 8, 12)

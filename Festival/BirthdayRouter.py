@@ -2,6 +2,7 @@ from calendar import monthrange
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from Auth import roles as roles_util
@@ -12,14 +13,29 @@ from Festival.BirthdayService import (
     BIRTHDAY_SEND_HOUR,
     BIRTHDAY_SEND_MINUTE,
     BIRTHDAY_TIMEZONE,
+    get_or_create_birthday_settings,
     is_active_employee,
     today_in_birthday_timezone,
 )
+from Festival import common
 import module.EmplyeeDB as EmployeeDB
 import module.FestivalDB as FestivalDB
 
 
 router = APIRouter(prefix="/birthdays", tags=["Employee Birthdays"])
+
+
+class BirthdaySettingsUpdate(BaseModel):
+    subject_template: str = Field(min_length=1, max_length=200)
+    message_html: str = Field(min_length=1, max_length=100_000)
+    template_id: int | None = None
+
+    @field_validator("subject_template", "message_html")
+    @classmethod
+    def must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("This field cannot be blank.")
+        return value.strip()
 
 
 def _require_admin_or_hr(user: User) -> None:
@@ -35,6 +51,78 @@ def _birthday_in_year(dob: date, year: int) -> date:
 def next_birthday(dob: date, today: date) -> date:
     candidate = _birthday_in_year(dob, today.year)
     return candidate if candidate >= today else _birthday_in_year(dob, today.year + 1)
+
+
+def _serialize_settings(settings, db: Session):
+    resolved_template = common.get_template(settings.template_id, db)
+    return {
+        "subject_template": settings.subject_template,
+        "message_html": settings.message_html,
+        "template_id": settings.template_id,
+        "resolved_template_id": resolved_template.id if resolved_template else None,
+        "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+    }
+
+
+def _serialize_layout(template):
+    return {
+        "id": template.id,
+        "name": template.name,
+        "header_html": template.header_html,
+        "header_bg_color": template.header_bg_color,
+        "highlight_html": template.highlight_html or "",
+        "highlight_bg_color": template.highlight_bg_color,
+        "footer_html": template.footer_html,
+        "footer_bg_color": template.footer_bg_color,
+        "is_default": template.is_default,
+        "logo_url": template.logo_url or "",
+        "logo_width": template.logo_width or 120,
+        "logo_align": template.logo_align or "center",
+    }
+
+
+@router.get("/settings")
+def get_birthday_settings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin_or_hr(current_user)
+    return _serialize_settings(get_or_create_birthday_settings(db), db)
+
+
+@router.get("/layouts")
+def list_birthday_layouts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin_or_hr(current_user)
+    templates = db.query(FestivalDB.WishTemplate).order_by(FestivalDB.WishTemplate.name).all()
+    return [_serialize_layout(template) for template in templates]
+
+
+@router.put("/settings")
+def update_birthday_settings(
+    payload: BirthdaySettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin_or_hr(current_user)
+    if payload.template_id is not None:
+        template_exists = (
+            db.query(FestivalDB.WishTemplate.id)
+            .filter(FestivalDB.WishTemplate.id == payload.template_id)
+            .first()
+        )
+        if not template_exists:
+            raise HTTPException(status_code=400, detail="The selected email layout no longer exists.")
+
+    settings = get_or_create_birthday_settings(db)
+    settings.subject_template = payload.subject_template
+    settings.message_html = payload.message_html
+    settings.template_id = payload.template_id
+    db.commit()
+    db.refresh(settings)
+    return _serialize_settings(settings, db)
 
 
 @router.get("/overview")
