@@ -108,6 +108,40 @@ class BirthdayWishLog(Base):
     sent_at = Column(DateTime, nullable=True)
 
 
+class WorkAnniversarySettings(Base):
+    """Editable content used by the automatic work-anniversary scheduler."""
+    __tablename__ = "work_anniversary_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    subject_template = Column(String, nullable=False)
+    message_html = Column(Text, nullable=False)
+    template_id = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkAnniversaryWishLog(Base):
+    """One delivery claim per employee anniversary date."""
+    __tablename__ = "work_anniversary_wish_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "emp_id",
+            "anniversary_date",
+            name="uq_work_anniversary_employee_date",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    emp_id = Column(String, nullable=False, index=True)
+    employee_name = Column(String, nullable=True)
+    to_email = Column(String, nullable=False)
+    anniversary_date = Column(Date, nullable=False, index=True)
+    years_completed = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="processing")
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    sent_at = Column(DateTime, nullable=True)
+
+
 class CommercialEmail(Base):
     """One-off / ad-hoc commercial email campaigns — same send pipeline as
     Festival Wishes (audience, template, CC, from-email, mail-merge) but

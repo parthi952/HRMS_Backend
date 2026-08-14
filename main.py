@@ -39,6 +39,13 @@ from Festival.BirthdayService import (
     BIRTHDAY_TIMEZONE,
     send_today_birthday_wishes,
 )
+from Festival.WorkAnniversaryRouter import router as work_anniversary_router
+from Festival.WorkAnniversaryService import (
+    WORK_ANNIVERSARY_SEND_HOUR,
+    WORK_ANNIVERSARY_SEND_MINUTE,
+    WORK_ANNIVERSARY_TIMEZONE,
+    send_today_work_anniversary_wishes,
+)
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler()
@@ -72,6 +79,11 @@ def _birthday_job():
     asyncio.run(send_today_birthday_wishes())
 
 
+def _work_anniversary_job():
+    import asyncio
+    asyncio.run(send_today_work_anniversary_wishes())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
@@ -94,6 +106,18 @@ async def lifespan(app: FastAPI):
             minute=BIRTHDAY_SEND_MINUTE,
             timezone=BIRTHDAY_TIMEZONE,
             id="employee_birthday_wishes",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60 * 60,
+        )
+        scheduler.add_job(
+            _work_anniversary_job,
+            "cron",
+            hour=WORK_ANNIVERSARY_SEND_HOUR,
+            minute=WORK_ANNIVERSARY_SEND_MINUTE,
+            timezone=WORK_ANNIVERSARY_TIMEZONE,
+            id="employee_work_anniversary_wishes",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -177,3 +201,4 @@ app.include_router(Compat.router)
 app.include_router(festival_router)
 app.include_router(commercial_router)
 app.include_router(birthday_router)
+app.include_router(work_anniversary_router)
