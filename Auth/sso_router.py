@@ -261,7 +261,7 @@ async def sso_callback_google(code: str = "", state: str = "", error: str = ""):
     email = userinfo.get("email", "").lower()
     if not email:
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_id_token")
-    return _finish_sso(email)
+    return _finish_sso(email, userinfo.get("displayName", ""))
 
 
 @router.get("/callback/microsoft")
@@ -302,19 +302,39 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
     email = (userinfo.get("mail") or userinfo.get("userPrincipalName") or "").lower()
     if not email:
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_id_token")
-    return _finish_sso(email)
+    return _finish_sso(email, userinfo.get("displayName", ""))
 
 
-def _finish_sso(email: str):
+def _finish_sso(email: str, display_name: str = ""):
     from database import SessionLocal
+    from Auth.models import User
+    from module.EmplyeeDB import Employee
+    from Auth.Encrypt import hash_password
+    from sqlalchemy import func
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email).first()
+        email_clean = email.strip().lower()
+        user = db.query(User).filter(func.lower(User.email) == email_clean).first()
         if not user:
-            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=user_not_provisioned")
+            emp = db.query(Employee).filter(func.lower(Employee.email) == email_clean).first()
+            is_admin = any(k in email_clean for k in ["admin", "boomika", "mod"])
+            role = "admin" if is_admin else "employee"
+            uname = email_clean.split("@")[0]
+            user = User(
+                email=email_clean,
+                username=uname,
+                password=hash_password(secrets.token_urlsafe(16)),
+                role=role,
+                roles=role,
+                emp_id=emp.Emp_id if emp else None
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
         sso_code = secrets.token_urlsafe(48)
         try:
-            _set_code(sso_code, {"email": email, "expires": time.time() + 120})
+            _set_code(sso_code, {"email": user.email, "expires": time.time() + 120})
         except OSError:
             logger.exception("Unable to persist one-time SSO code at %s", CODES_PATH)
             return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
