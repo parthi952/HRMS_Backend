@@ -66,6 +66,7 @@ from database import Base, engine, get_db
 
 
 import module.OffBoardDB as OffBoardDB
+import module.OnboardingDB as OnboardingDB
 
 
 
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI):
     EmplyeeDB.Base.metadata.create_all(bind=engine)
     ATSScoreDB.Base.metadata.create_all(bind=engine)
     OffBoardDB.Base.metadata.create_all(bind=engine)
+    OnboardingDB.Base.metadata.create_all(bind=engine)
     FestivalDB.Base.metadata.create_all(bind=engine)
     seed_default_festivals()
     seed_default_template()

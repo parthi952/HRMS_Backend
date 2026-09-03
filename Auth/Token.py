@@ -9,8 +9,8 @@ import os
 
 load_dotenv()
 
-ACCESS_SECRET_KEY = os.getenv("ACCESS_SECRET_KEY")
-REFRESH_SECRET_KEY = os.getenv("REFRESH_SECRET_KEY")
+ACCESS_SECRET_KEY = os.getenv("ACCESS_SECRET_KEY") or "hrms-access-secret-key-apex-365-token"
+REFRESH_SECRET_KEY = os.getenv("REFRESH_SECRET_KEY") or "hrms-refresh-secret-key-apex-365-token"
 
 ALGORITHM = "HS256"
 
