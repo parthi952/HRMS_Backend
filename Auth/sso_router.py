@@ -35,8 +35,8 @@ CODES_PATH = os.getenv(
     "SSO_CODES_PATH",
     os.path.join(tempfile.gettempdir(), "hrms_sso_codes.json"),
 )
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://hrm.tibostech.in")
+API_URL = os.getenv("API_URL", "https://hrm-api.tibostech.in")
 
 
 def _load_config() -> dict:
