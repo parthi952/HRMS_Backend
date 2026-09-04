@@ -81,6 +81,7 @@ def get_provider_by_id(provider_id: str, db: Session = Depends(get_db)):
     return provider
 
 
+@router.delete("/providers/{provider_id}")
 @router.delete("/delete/provider/{provider_id}")
 def delete_provider(
     provider_id: str,
