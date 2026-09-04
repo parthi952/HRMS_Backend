@@ -4,7 +4,8 @@ from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 
 from database import Base
-# pyrefly: ignore [missing-import]
+import module.DepartmentDB
+import module.payrollProvider
 import module.PayrollDB
 from module.EmplyeeDB import Employee
 

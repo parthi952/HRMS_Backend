@@ -364,15 +364,24 @@ def _finish_sso(email: str, display_name: str = ""):
         email_clean = email.strip().lower()
         user = db.query(User).filter(func.lower(User.email) == email_clean).first()
         if not user:
+            # Generate a unique username if base username already exists
+            base_uname = email_clean.split("@")[0].replace(".", "_")
+            uname = base_uname
+            counter = 1
+            while db.query(User).filter(func.lower(User.username) == uname.lower()).first():
+                uname = f"{base_uname}{counter}"
+                counter += 1
+
             emp = None
             try:
                 emp = db.query(Employee).filter(func.lower(Employee.email) == email_clean).first()
+                if not emp and display_name:
+                    emp = db.query(Employee).filter(func.lower(Employee.name) == display_name.strip().lower()).first()
             except Exception as e:
                 logger.warning("Employee lookup error in SSO: %s", e)
 
             is_admin = any(k in email_clean for k in ["admin", "boomika", "mod"])
             role = "admin" if is_admin else "employee"
-            uname = email_clean.split("@")[0]
             user = User(
                 email=email_clean,
                 username=uname,
@@ -400,7 +409,8 @@ def _finish_sso(email: str, display_name: str = ""):
     except Exception as e:
         logger.exception("SSO finish database error for %s: %s", email, e)
         db.rollback()
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
+        err_msg = str(e).splitlines()[0] if str(e) else "database_error"
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error={quote(err_msg)}")
     finally:
         db.close()
 
