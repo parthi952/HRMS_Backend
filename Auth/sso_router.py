@@ -8,7 +8,7 @@ import logging
 import secrets
 import tempfile
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 try:
     import fcntl
 except ImportError:
@@ -269,11 +269,13 @@ async def sso_callback_google(code: str = "", state: str = "", error: str = ""):
 
 
 @router.get("/callback/microsoft")
-async def sso_callback_microsoft(code: str = "", state: str = "", error: str = ""):
+async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "", error_description: str = ""):
     try:
         if error:
-            logger.warning("Microsoft OAuth returned error: %s", error)
-            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
+            logger.warning("Microsoft OAuth returned error: %s - %s", error, error_description)
+            err_text = error_description or error or "OAuth authorization was cancelled or denied"
+            clean_err = err_text.splitlines()[0].split("Trace ID")[0].strip()
+            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error={quote(clean_err)}")
         
         try:
             _cleanup_codes()
@@ -290,6 +292,7 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
         cfg = _load_config()
         m = cfg.get("microsoft", {})
         tenant = m.get("tenant", "common")
+        redirect_uri = f"{API_URL}/Auth/sso/callback/microsoft"
         
         async with httpx.AsyncClient(timeout=20.0) as client:
             token_resp = await client.post(
@@ -298,7 +301,7 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
                     "code": code,
                     "client_id": m.get("client_id", ""),
                     "client_secret": m.get("client_secret", ""),
-                    "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
+                    "redirect_uri": redirect_uri,
                     "grant_type": "authorization_code",
                     "scope": "openid email profile User.Read",
                 }
@@ -306,13 +309,20 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
             tokens = token_resp.json()
             if "access_token" not in tokens:
                 logger.error("Microsoft token exchange error: %s", tokens)
-                return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
+                raw_err = tokens.get("error_description") or tokens.get("error") or "token_exchange_failed"
+                clean_err = raw_err.splitlines()[0].split("Trace ID")[0].strip()
+                return RedirectResponse(f"{FRONTEND_URL}/login?sso_error={quote(clean_err)}")
             
             userinfo_resp = await client.get(
                 "https://graph.microsoft.com/v1.0/me",
                 headers={"Authorization": f"Bearer {tokens['access_token']}"}
             )
             userinfo = userinfo_resp.json()
+            if "error" in userinfo:
+                logger.error("Microsoft Graph /me error: %s", userinfo)
+                graph_err = userinfo.get("error", {}).get("message", "Graph API error")
+                return RedirectResponse(f"{FRONTEND_URL}/login?sso_error={quote(graph_err)}")
+            
             logger.info("Microsoft userinfo received for SSO: %s", userinfo.get("mail") or userinfo.get("userPrincipalName"))
 
         email = (userinfo.get("mail") or userinfo.get("userPrincipalName") or "").lower().strip()
@@ -321,7 +331,7 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
         return _finish_sso(email, userinfo.get("displayName", ""))
     except Exception as e:
         logger.exception("Unhandled error in sso_callback_microsoft: %s", e)
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error={quote(str(e))}")
 
 
 def _finish_sso(email: str, display_name: str = ""):
