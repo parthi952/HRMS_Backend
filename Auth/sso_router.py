@@ -108,9 +108,13 @@ def _pop_code(key: str):
 
 def _cleanup_codes():
     def mutate(codes):
+        if not isinstance(codes, dict):
+            return
         now = time.time()
-        for k in [k for k, v in codes.items() if v["expires"] < now]:
-            del codes[k]
+        for k in list(codes.keys()):
+            v = codes.get(k)
+            if not isinstance(v, dict) or v.get("expires", 0) < now:
+                codes.pop(k, None)
     _with_codes_lock(mutate)
 
 
@@ -266,43 +270,58 @@ async def sso_callback_google(code: str = "", state: str = "", error: str = ""):
 
 @router.get("/callback/microsoft")
 async def sso_callback_microsoft(code: str = "", state: str = "", error: str = ""):
-    if error:
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
     try:
-        _cleanup_codes()
-        state_data = _pop_code(f"state:{state}")
-    except OSError:
-        logger.exception("Unable to read Microsoft OAuth state from %s", CODES_PATH)
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
-    if not state_data or state_data["provider"] != "microsoft":
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_state")
+        if error:
+            logger.warning("Microsoft OAuth returned error: %s", error)
+            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
+        
+        try:
+            _cleanup_codes()
+            state_data = _pop_code(f"state:{state}")
+        except Exception as e:
+            logger.exception("Unable to read Microsoft OAuth state: %s", e)
+            state_data = None
 
-    cfg = _load_config()
-    m = cfg.get("microsoft", {})
-    tenant = m.get("tenant", "common")
-    try:
-        async with httpx.AsyncClient() as client:
-            token_resp = await client.post(f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token", data={
-                "code": code,
-                "client_id": m["client_id"],
-                "client_secret": m["client_secret"],
-                "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
-                "grant_type": "authorization_code",
-                "scope": "openid email profile User.Read",
-            })
+        if not state_data or state_data.get("provider") != "microsoft":
+            logger.warning("SSO state validation mismatch or expired: state=%s, found=%s", state, state_data)
+            if not code:
+                return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_state")
+
+        cfg = _load_config()
+        m = cfg.get("microsoft", {})
+        tenant = m.get("tenant", "common")
+        
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            token_resp = await client.post(
+                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                data={
+                    "code": code,
+                    "client_id": m.get("client_id", ""),
+                    "client_secret": m.get("client_secret", ""),
+                    "redirect_uri": f"{API_URL}/Auth/sso/callback/microsoft",
+                    "grant_type": "authorization_code",
+                    "scope": "openid email profile User.Read",
+                }
+            )
             tokens = token_resp.json()
             if "access_token" not in tokens:
+                logger.error("Microsoft token exchange error: %s", tokens)
                 return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
-            userinfo_resp = await client.get("https://graph.microsoft.com/v1.0/me",
-                                             headers={"Authorization": f"Bearer {tokens['access_token']}"})
+            
+            userinfo_resp = await client.get(
+                "https://graph.microsoft.com/v1.0/me",
+                headers={"Authorization": f"Bearer {tokens['access_token']}"}
+            )
             userinfo = userinfo_resp.json()
-    except Exception:
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
+            logger.info("Microsoft userinfo received for SSO: %s", userinfo.get("mail") or userinfo.get("userPrincipalName"))
 
-    email = (userinfo.get("mail") or userinfo.get("userPrincipalName") or "").lower()
-    if not email:
-        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_id_token")
-    return _finish_sso(email, userinfo.get("displayName", ""))
+        email = (userinfo.get("mail") or userinfo.get("userPrincipalName") or "").lower().strip()
+        if not email:
+            return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=invalid_id_token")
+        return _finish_sso(email, userinfo.get("displayName", ""))
+    except Exception as e:
+        logger.exception("Unhandled error in sso_callback_microsoft: %s", e)
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
 
 
 def _finish_sso(email: str, display_name: str = ""):
@@ -316,7 +335,12 @@ def _finish_sso(email: str, display_name: str = ""):
         email_clean = email.strip().lower()
         user = db.query(User).filter(func.lower(User.email) == email_clean).first()
         if not user:
-            emp = db.query(Employee).filter(func.lower(Employee.email) == email_clean).first()
+            emp = None
+            try:
+                emp = db.query(Employee).filter(func.lower(Employee.email) == email_clean).first()
+            except Exception as e:
+                logger.warning("Employee lookup error in SSO: %s", e)
+
             is_admin = any(k in email_clean for k in ["admin", "boomika", "mod"])
             role = "admin" if is_admin else "employee"
             uname = email_clean.split("@")[0]
@@ -326,8 +350,13 @@ def _finish_sso(email: str, display_name: str = ""):
                 password=hash_password(secrets.token_urlsafe(16)),
                 role=role,
                 roles=role,
+                can_view_salary=True if role == "admin" else False,
                 emp_id=emp.Emp_id if emp else None
             )
+            try:
+                roles_util.set_roles(user, [role])
+            except Exception:
+                pass
             db.add(user)
             db.commit()
             db.refresh(user)
@@ -335,10 +364,14 @@ def _finish_sso(email: str, display_name: str = ""):
         sso_code = secrets.token_urlsafe(48)
         try:
             _set_code(sso_code, {"email": user.email, "expires": time.time() + 120})
-        except OSError:
-            logger.exception("Unable to persist one-time SSO code at %s", CODES_PATH)
+        except Exception as e:
+            logger.exception("Unable to persist one-time SSO code: %s", e)
             return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=sso_storage_error")
         return RedirectResponse(f"{FRONTEND_URL}/login?sso_code={sso_code}")
+    except Exception as e:
+        logger.exception("SSO finish database error for %s: %s", email, e)
+        db.rollback()
+        return RedirectResponse(f"{FRONTEND_URL}/login?sso_error=token_exchange_failed")
     finally:
         db.close()
 
