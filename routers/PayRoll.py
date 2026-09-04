@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -6,7 +6,10 @@ from database import get_db
 from module import EmplyeeDB
 from module.payrollProvider import PayRollProvider, Earning, Deduction
 from Schemas.PayrollSchemas import PayRollProviderCreate, PayRollProviderOut, PayrollCalculateRequest
-from typing import List
+from typing import List, Optional
+from Auth.router import get_current_user
+from Auth.models import User
+from Auth import roles as roles_util
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +22,12 @@ router = APIRouter(prefix="/payroll", tags=["Payroll"])
 )
 def create_payroll_provider(
     provider_data: PayRollProviderCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    if not roles_util.has_role(current_user, "admin", "hr"):
+        raise HTTPException(status_code=403, detail="Admin or HR role required.")
+
     # 1. Check for duplicate provider name
     existing = db.query(PayRollProvider).filter(
         PayRollProvider.providername == provider_data.providername
@@ -31,17 +38,14 @@ def create_payroll_provider(
             detail=f"A provider with the name '{provider_data.providername}' already exists."
         )
 
-    # 2. Generate a unique provider_id using UUID (thread-safe, no race condition)
     new_id = f"provider_{uuid.uuid4().hex[:8]}"
 
-    # 3. Create Provider Instance
     new_provider = PayRollProvider(
         provider_id=new_id,
         providername=provider_data.providername,
         description=provider_data.description or ""
     )
 
-    # 4. Add Earnings & Deductions
     new_provider.earnings = [Earning(**earn.model_dump()) for earn in provider_data.earnings]
     new_provider.deductions = [Deduction(**ded.model_dump()) for ded in provider_data.deductions]
 
@@ -77,46 +81,57 @@ def get_provider_by_id(provider_id: str, db: Session = Depends(get_db)):
     return provider
 
 
-
-@router.delete("/providers/{provider_id}")
-def delete_provider(provider_id: str, db: Session = Depends(get_db)):
-
+@router.delete("/delete/provider/{provider_id}")
+def delete_provider(
+    provider_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not roles_util.has_role(current_user, "admin", "hr"):
+        raise HTTPException(status_code=403, detail="Admin or HR role required.")
     try:
         provider = db.query(PayRollProvider).filter(
             PayRollProvider.provider_id == provider_id
         ).first()
 
         if not provider:
-            raise HTTPException(status_code=404, detail="Provider not found")
+            raise HTTPException(
+                status_code=404,
+                detail="Provider not found"
+            )
 
-        # ✅ Delete children using ORM (SAFE)
         for earning in provider.earnings:
             db.delete(earning)
 
         for deduction in provider.deductions:
             db.delete(deduction)
 
-        # ✅ Delete parent
         db.delete(provider)
-
         db.commit()
 
         return {"message": "Deleted successfully"}
 
     except Exception as e:
         db.rollback()
-        print("🔥 REAL DELETE ERROR:", e)  # IMPORTANT
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)   # 👈 show real error in frontend
-        )
-
+        print("REAL DELETE ERROR:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/details/{emp_id}")
-def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
+def get_full_payroll(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
+):
+    # Check permissions
+    # 1. Employee can view their own payroll details
+    # 2. Admin, HR, Developer or users with payroll module access can view
+    is_own = current_user and current_user.emp_id == emp_id
+    is_mgmt = current_user and (roles_util.has_role(current_user, "admin", "hr", "developer") or roles_util.has_module_access(current_user, "payroll"))
 
-    # ✅ 1. Employee
+    if not is_own and not is_mgmt:
+        raise HTTPException(status_code=403, detail="Access denied. You can only view your own payroll records.")
+
     emp = db.query(EmplyeeDB.Employee).filter(
         EmplyeeDB.Employee.Emp_id == emp_id
     ).first()
@@ -124,7 +139,6 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # ✅ 2. Provider
     provider = db.query(PayRollProvider).filter(
         PayRollProvider.provider_id == emp.provider
     ).first()
@@ -135,11 +149,7 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
             detail=f"Provider '{emp.provider}' not found"
         )
 
-    # ✅ 3. Provider Name
     provider_name = provider.providername
-
-    # ✅ 4. Salary Mode (IMPORTANT)
-    # assume emp.salary_type = "monthly" or "yearly"
     salary_type = getattr(emp, "salary_type", "yearly")
 
     if salary_type == "monthly":
@@ -149,9 +159,7 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
         yearly_base = float(emp.annualSalary or 0)
         monthly_base = yearly_base / 12
 
-    # -----------------------------
-    # ✅ MONTHLY CALCULATION
-    # -----------------------------
+    # Monthly calculation
     earnings_month = []
     deductions_month = []
 
@@ -177,9 +185,7 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
     gross_month = monthly_base + total_earn_m
     net_month = gross_month - total_ded_m
 
-    # -----------------------------
-    # ✅ YEARLY CALCULATION
-    # -----------------------------
+    # Yearly calculation
     earnings_year = []
     deductions_year = []
 
@@ -201,14 +207,30 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
     gross_year = gross_month * 12
     net_year = net_month * 12
 
-    # -----------------------------
-    # ✅ FINAL RESPONSE
-    # -----------------------------
+    # Privacy masking check:
+    # If not own record and user cannot view unmasked salary (e.g. developer), mask the figures!
+    can_view = is_own or roles_util.can_view_salary(current_user)
+
+    if not can_view:
+        # Mask sensitive amounts
+        monthly_base = 0.0
+        yearly_base = 0.0
+        gross_month = 0.0
+        net_month = 0.0
+        gross_year = 0.0
+        net_year = 0.0
+        earnings_month = [{"name": e["name"], "value": 0.0} for e in earnings_month]
+        deductions_month = [{"name": d["name"], "value": 0.0} for d in deductions_month]
+        earnings_year = [{"name": e["name"], "value": 0.0} for e in earnings_year]
+        deductions_year = [{"name": d["name"], "value": 0.0} for d in deductions_year]
+
     return {
         "emp_id": emp_id,
+        "employee_name": f"{emp.f_name or ''} {emp.l_name or ''}".strip() or emp.name,
         "provider_id": emp.provider,
         "provider_name": provider_name,
         "salary_type": salary_type,
+        "is_masked": not can_view,
 
         "monthly": {
             "base_salary": round(monthly_base, 2),
@@ -229,11 +251,18 @@ def get_full_payroll(emp_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/")
-def get_all_employee_payroll(db: Session = Depends(get_db)):
+def get_all_employee_payroll(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
+):
+    # Allow admin, hr, developer, or users with payroll module
+    if current_user and not (roles_util.has_role(current_user, "admin", "hr", "developer") or roles_util.has_module_access(current_user, "payroll")):
+        raise HTTPException(status_code=403, detail="Access denied. Payroll management role required.")
+
+    can_view = roles_util.can_view_salary(current_user) if current_user else True
 
     try:
         employees = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Status == "Active").all()
-        # Pre-fetch all providers to avoid N+1 queries
         providers = db.query(PayRollProvider).all()
         provider_map = {p.provider_id: p for p in providers}
 
@@ -247,7 +276,6 @@ def get_all_employee_payroll(db: Session = Depends(get_db)):
             else:
                 monthly_base = annual / 12
 
-            # Calculate Net if provider exists
             net_pay = monthly_base
             provider = provider_map.get(emp.provider)
             if provider:
@@ -261,30 +289,32 @@ def get_all_employee_payroll(db: Session = Depends(get_db)):
                     total_ded += val
                 net_pay = (monthly_base + total_earn) - total_ded
 
+            # Apply masking if not allowed to view salary
+            effective_net = round(net_pay, 2) if can_view else 0.0
+
             result.append({
                 "emp_id": emp.Emp_id,
                 "provider_name": provider.providername if provider else "N/A",
                 "employee": f"{emp.f_name or ''} {emp.l_name or ''}".strip(),
                 "department": emp.Department or "N/A",
-                "net": round(net_pay, 2),
+                "net": effective_net,
+                "is_masked": not can_view,
                 "status": "Pending"
             })
 
         return result
 
     except Exception as e:
-        print("🔥 ERROR:", e)   # 👈 VERY IMPORTANT
+        print("ERROR in payroll list:", e)
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @router.post("/calculate")
 def calculate_payroll(
     payload: PayrollCalculateRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
 ):
-
-    # ✅ Provider
     provider = db.query(PayRollProvider).filter(
         PayRollProvider.provider_id == payload.provider_id
     ).first()
@@ -295,82 +325,56 @@ def calculate_payroll(
             detail="Provider not found"
         )
 
-    # -----------------------------
-    # BASE SALARY
-    # -----------------------------
     if payload.salary_type == "monthly":
         monthly_base = float(payload.salary)
     else:
         monthly_base = float(payload.salary) / 12
 
-    # -----------------------------
-    # EARNINGS
-    # -----------------------------
     earnings = []
     total_earnings = 0
 
     for earn in provider.earnings:
-
         amount = (
             (monthly_base * earn.value) / 100
             if earn.type == "percentage"
             else earn.value
         )
-
         earnings.append({
             "name": earn.name,
             "type": earn.type,
             "value": earn.value,
             "amount": round(amount, 2)
         })
-
         total_earnings += amount
 
-    # -----------------------------
-    # DEDUCTIONS
-    # -----------------------------
     deductions = []
     total_deductions = 0
 
     for ded in provider.deductions:
-
         amount = (
             (monthly_base * ded.value) / 100
             if ded.type == "percentage"
             else ded.value
         )
-
         deductions.append({
             "name": ded.name,
             "type": ded.type,
             "value": ded.value,
             "amount": round(amount, 2)
         })
-
         total_deductions += amount
 
-    # -----------------------------
-    # FINAL CALCULATION
-    # -----------------------------
     gross = monthly_base + total_earnings
-
     net = gross - total_deductions
 
-    # -----------------------------
-    # RESPONSE
-    # -----------------------------
     return {
         "provider_id": provider.provider_id,
         "provider_name": provider.providername,
-
         "baseSalary": round(monthly_base, 2),
-
         "earnings": earnings,
         "deductions": deductions,
-
         "totalEarnings": round(total_earnings, 2),
         "totalDeductions": round(total_deductions, 2),
-
         "gross": round(gross, 2),
         "net": round(net, 2)
     }

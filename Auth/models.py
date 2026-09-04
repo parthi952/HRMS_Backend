@@ -1,5 +1,5 @@
 # pyrefly: ignore [missing-import]
-from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 # pyrefly: ignore [missing-import]
 from sqlalchemy.orm import relationship
 
@@ -15,11 +15,14 @@ class User(Base):
     username      = Column(String, unique=True, index=True, nullable=True)
     email         = Column(String, unique=True, index=True, nullable=False)
     password      = Column(String, nullable=False)
-    # Effective (highest-privilege) role. Every existing permission check reads
-    # this, so it stays a single value derived from `roles`.
-    role          = Column(String, default="employee")  # options: admin, hr, manager, employee
-    # Every role the person was granted, comma-separated, e.g. "admin,hr".
+    # Effective (highest-privilege) role: admin, hr, developer, recruiter, manager, employee
+    role          = Column(String, default="employee")
+    # Every role the person was granted, comma-separated, e.g. "developer,hr"
     roles         = Column(String, nullable=True)
+    # Explicit salary viewing permission toggle: True = can view unmasked salary/CTC, False = masked
+    can_view_salary = Column(Boolean, default=False, nullable=True)
+    # Custom allowed modules (comma-separated or JSON list)
+    allowed_modules = Column(String, nullable=True)
     emp_id        = Column(String, ForeignKey("employees.Emp_id", ondelete="SET NULL"), nullable=True)
 
     # Relationship back to Employee profile if linked

@@ -19,7 +19,9 @@ from Caluclation.PayrollEandD import calculate_salary
 import module.payrollProvider as payrollProvider
 
 def check_employee_permission(emp_id: str, current_user: User):
-    if roles_util.has_role(current_user, "admin", "hr"):
+    if roles_util.has_role(current_user, "admin", "hr", "developer"):
+        return
+    if roles_util.has_module_access(current_user, "employee_management"):
         return
     if current_user.emp_id == emp_id:
         return
@@ -29,11 +31,12 @@ def check_employee_permission(emp_id: str, current_user: User):
     )
 
 def check_admin_or_hr_permission(current_user: User):
-    if not roles_util.has_role(current_user, "admin", "hr"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. HR or Admin role required."
-        )
+    if not roles_util.has_role(current_user, "admin", "hr", "developer"):
+        if not roles_util.has_module_access(current_user, "employee_management"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied. HR, Admin, or Developer role required."
+            )
 
 
 # ─── Employee CRUD ────────────────────────────────────────────────────────────
@@ -202,9 +205,37 @@ def get_employee(
     # Perform dynamic calculation
     payroll_results = calculate_salary(base_salary, earnings, deductions)
 
-    # Return unified response
+    # Privacy masking for sensitive personal and compensation details
+    can_view = (current_user.emp_id == emp_id) or roles_util.can_view_salary(current_user)
+    if not can_view:
+        # Clone or mask sensitive fields
+        masked_emp = dict(emp.__dict__) if hasattr(emp, "__dict__") else dict(emp)
+        masked_emp.pop("_sa_instance_state", None)
+        masked_emp["annualSalary"] = 0.0
+        masked_emp["bonus_Value"] = 0.0
+        masked_emp["accountNumber"] = roles_util.mask_string(emp.accountNumber, 4) if emp.accountNumber else ""
+        masked_emp["panNumber"] = roles_util.mask_string(emp.panNumber, 4) if emp.panNumber else ""
+        masked_emp["aadhar_no"] = roles_util.mask_string(emp.aadhar_no, 4) if emp.aadhar_no else ""
+        
+        # Mask payroll breakdown
+        payroll_results = {
+            "base_salary": 0.0,
+            "gross_salary": 0.0,
+            "total_earnings": 0.0,
+            "total_deductions": 0.0,
+            "net_salary": 0.0,
+            "earnings_breakdown": [{"name": e.get("name"), "amount": 0.0} for e in payroll_results.get("earnings_breakdown", [])],
+            "deductions_breakdown": [{"name": d.get("name"), "amount": 0.0} for d in payroll_results.get("deductions_breakdown", [])],
+        }
+        return {
+            "Employee": masked_emp,
+            "is_masked": True,
+            **payroll_results
+        }
+
     return {
         "Employee": emp,
+        "is_masked": False,
         **payroll_results
     }
 
@@ -215,9 +246,29 @@ def list_employees(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    check_admin_or_hr_permission(current_user)
+    # Allow admin, hr, developer, recruiter
+    if not roles_util.has_role(current_user, "admin", "hr", "developer", "recruiter"):
+        if not roles_util.has_module_access(current_user, "employee_management"):
+            raise HTTPException(status_code=403, detail="Access denied.")
+
     stmt = select(EmplyeeDB.Employee)
     employees = db.execute(stmt).mappings().all()
+
+    can_view = roles_util.can_view_salary(current_user)
+    if not can_view:
+        # Mask salary/bank info in list
+        result = []
+        for row in employees:
+            e_dict = dict(row["Employee"].__dict__) if hasattr(row.get("Employee"), "__dict__") else dict(row.get("Employee") or {})
+            e_dict.pop("_sa_instance_state", None)
+            if e_dict.get("Emp_id") != current_user.emp_id:
+                e_dict["annualSalary"] = 0.0
+                e_dict["bonus_Value"] = 0.0
+                e_dict["accountNumber"] = roles_util.mask_string(e_dict.get("accountNumber"), 4) if e_dict.get("accountNumber") else ""
+                e_dict["panNumber"] = roles_util.mask_string(e_dict.get("panNumber"), 4) if e_dict.get("panNumber") else ""
+                e_dict["aadhar_no"] = roles_util.mask_string(e_dict.get("aadhar_no"), 4) if e_dict.get("aadhar_no") else ""
+            result.append({"Employee": e_dict})
+        return result
     return employees
 
 

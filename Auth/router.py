@@ -3,10 +3,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db, engine
+import json
 
 # Absolute imports starting from root package
 from Auth.models import User
-from Auth.Schema import UserCreate, UserLogin, Token, TokenRefreshRequest, UserResponse
+from Auth.Schema import UserCreate, UserLogin, Token, TokenRefreshRequest, UserResponse, UserPermissionUpdate
 from Auth.Token import create_access_token, create_refresh_token, verify_token, verify_refresh_token
 from Auth.Encrypt import hash_password, verify_password
 from Auth import roles as roles_util
@@ -19,9 +20,19 @@ try:
             _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN roles VARCHAR;"))
             _conn.commit()
         except Exception:
-            _conn.rollback()  # already present
+            _conn.rollback()
         try:
-            # Backfill the set from the single role every existing login has
+            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN can_view_salary BOOLEAN DEFAULT 0;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+        try:
+            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN allowed_modules VARCHAR;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+        try:
+            # Backfill roles from role if roles is null
             _conn.execute(_sa_text("UPDATE users SET roles = role WHERE roles IS NULL AND role IS NOT NULL;"))
             _conn.commit()
         except Exception:
@@ -39,13 +50,7 @@ router = APIRouter(
 security = HTTPBearer()
 
 def link_employee_profile(user: User, db: Session):
-    """Attach the login to its employee record when it isn't linked yet.
-
-    SSO-provisioned accounts (and hand-made admin accounts) land with
-    emp_id NULL, which leaves the person with no "My Profile" — even when an
-    employee row with the same email already exists. Match on email once and
-    persist it, so it only costs a lookup the first time.
-    """
+    """Attach the login to its employee record when it isn't linked yet."""
     if user.emp_id or not user.email:
         return user
     try:
@@ -78,6 +83,7 @@ def ensure_default_users(db: Session):
                 username="admin",
                 password=hash_password("password123"),
                 role="admin",
+                can_view_salary=True,
                 emp_id=None
             )
             roles_util.set_roles(admin_user, ["admin"])
@@ -86,6 +92,7 @@ def ensure_default_users(db: Session):
             if not admin_user.username:
                 admin_user.username = "admin"
             roles_util.set_roles(admin_user, ["admin"])
+            admin_user.can_view_salary = True
 
         hr_user = db.query(User).filter(
             (func.lower(User.email) == "hr@hrms.com") | (func.lower(User.username) == "hr")
@@ -96,6 +103,7 @@ def ensure_default_users(db: Session):
                 username="hr",
                 password=hash_password("password123"),
                 role="hr",
+                can_view_salary=True,
                 emp_id=None
             )
             roles_util.set_roles(hr_user, ["hr"])
@@ -103,11 +111,14 @@ def ensure_default_users(db: Session):
         else:
             if not hr_user.username:
                 hr_user.username = "hr"
+            if hr_user.can_view_salary is None:
+                hr_user.can_view_salary = True
 
         db.commit()
     except Exception as e:
         db.rollback()
         print("Default users seed notice:", e)
+
 
 # Dependency to get current user based on verified token
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)) -> User:
@@ -122,9 +133,18 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             detail="User not found"
         )
     return user
-    
-    
-# ✅ LOGIN ENDPOINT (POST)
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if not roles_util.has_role(current_user, "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin permission required."
+        )
+    return current_user
+
+
+# 🔑 LOGIN ENDPOINT (POST)
 @router.post("/login", response_model=Token)
 def login(login_data: UserLogin, db: Session = Depends(get_db)):
     ensure_default_users(db)
@@ -148,6 +168,7 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         user = db.query(User).filter(
             func.lower(User.email).like(f"{raw_id}@%")
         ).first()
+
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -173,26 +194,26 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         token_type="bearer",
         role=user.role,
         roles=roles_util.get_roles(user),
+        can_view_salary=roles_util.can_view_salary(user),
+        allowed_modules=roles_util.get_allowed_modules(user),
         email=user.email,
         emp_id=user.emp_id,
         name=emp_name
     )
 
 
-# ✅ LOGIN ENDPOINT (GET) for backward compatibility
+# 🔑 LOGIN ENDPOINT (GET) for backward compatibility
 @router.get("/Login")
 def Login():
     return {"message": "Employee API is active"}
 
 
-# ✅ REFRESH ENDPOINT
+# 🔑 REFRESH ENDPOINT
 @router.post("/refresh", response_model=Token)
 def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
     ensure_default_users(db)
-    # Verify the refresh token. Raises 401 if invalid.
     email = verify_refresh_token(refresh_data.refresh_token)
     
-    # Get user
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(
@@ -200,13 +221,11 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
             detail="User not found"
         )
         
-    # Generate new tokens
     access = create_access_token(user.email)
-    refresh = create_refresh_token(user.email)
+    refresh_tok = create_refresh_token(user.email)
 
     link_employee_profile(user, db)
 
-    # Resolve real name from linked employee profile
     emp_name = None
     if user.employee:
         emp_name = user.employee.name
@@ -215,22 +234,23 @@ def refresh(refresh_data: TokenRefreshRequest, db: Session = Depends(get_db)):
 
     return Token(
         access_token=access,
-        refresh_token=refresh,
+        refresh_token=refresh_tok,
         token_type="bearer",
         role=user.role,
         roles=roles_util.get_roles(user),
+        can_view_salary=roles_util.can_view_salary(user),
+        allowed_modules=roles_util.get_allowed_modules(user),
         email=user.email,
         emp_id=user.emp_id,
         name=emp_name
     )
 
 
-# ✅ ME ENDPOINT (Profile)
+# 🔑 ME ENDPOINT (Profile)
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     link_employee_profile(current_user, db)
 
-    # Resolve real name from linked employee profile
     emp_name = None
     if current_user.employee:
         emp_name = current_user.employee.name
@@ -243,8 +263,78 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
         email=current_user.email,
         role=current_user.role,
         roles=roles_util.get_roles(current_user),
+        can_view_salary=roles_util.can_view_salary(current_user),
+        allowed_modules=roles_util.get_allowed_modules(current_user),
         emp_id=current_user.emp_id,
         name=emp_name
     )
 
 
+# 🛡️ ADMIN: Get All Users and Permissions
+@router.get("/users/permissions")
+def list_user_permissions(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    users = db.query(User).all()
+    result = []
+    for u in users:
+        emp_name = u.employee.name if u.employee else (u.username or u.email.split("@")[0])
+        result.append({
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "role": u.role,
+            "roles": roles_util.get_roles(u),
+            "can_view_salary": roles_util.can_view_salary(u),
+            "allowed_modules": roles_util.get_allowed_modules(u),
+            "emp_id": u.emp_id,
+            "name": emp_name
+        })
+    return result
+
+
+# 🛡️ ADMIN: Update Specific User Permissions & Roles
+@router.put("/users/{user_id}/permissions")
+def update_user_permissions(
+    user_id: int,
+    payload: UserPermissionUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.roles is not None:
+        roles_util.set_roles(user, payload.roles)
+    elif payload.role is not None:
+        roles_util.set_roles(user, [payload.role])
+
+    if payload.can_view_salary is not None:
+        user.can_view_salary = payload.can_view_salary
+
+    if payload.allowed_modules is not None:
+        if isinstance(payload.allowed_modules, list):
+            user.allowed_modules = json.dumps(payload.allowed_modules)
+        else:
+            user.allowed_modules = str(payload.allowed_modules)
+
+    try:
+        db.commit()
+        db.refresh(user)
+        return {
+            "message": f"Permissions updated successfully for user {user.email}",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "role": user.role,
+                "roles": roles_util.get_roles(user),
+                "can_view_salary": roles_util.can_view_salary(user),
+                "allowed_modules": roles_util.get_allowed_modules(user),
+                "emp_id": user.emp_id
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

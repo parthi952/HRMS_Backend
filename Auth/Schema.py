@@ -1,12 +1,14 @@
-from typing import clear_overloads, List
+from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-from typing import Optional
 
 class UserCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     email: str
     password: str
-    role: Optional[str] = "employee"  # admin, hr, manager, employee
+    role: Optional[str] = "employee"  # admin, hr, developer, recruiter, manager, employee
+    roles: Optional[List[str]] = None
+    can_view_salary: Optional[bool] = None
+    allowed_modules: Optional[List[str]] = None
     emp_id: Optional[str] = None
 
     @field_validator("email")
@@ -26,9 +28,6 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    # Older clients submit `email`; some newer clients label the same value as
-    # `username`. Accept both so a frontend/backend version mismatch cannot turn
-    # a login attempt into a server error.
     email: Optional[str] = None
     username: Optional[str] = None
     password: str
@@ -50,6 +49,8 @@ class Token(BaseModel):
     token_type: str
     role: str
     roles: Optional[List[str]] = None
+    can_view_salary: Optional[bool] = None
+    allowed_modules: Optional[List[str]] = None
     email: str
     emp_id: Optional[str] = None
     name: Optional[str] = None
@@ -66,5 +67,14 @@ class UserResponse(BaseModel):
     email: str
     role: str
     roles: Optional[List[str]] = None
+    can_view_salary: Optional[bool] = None
+    allowed_modules: Optional[List[str]] = None
     emp_id: Optional[str] = None
     name: Optional[str] = None
+
+
+class UserPermissionUpdate(BaseModel):
+    role: Optional[str] = None
+    roles: Optional[List[str]] = None
+    can_view_salary: Optional[bool] = None
+    allowed_modules: Optional[List[str]] = None

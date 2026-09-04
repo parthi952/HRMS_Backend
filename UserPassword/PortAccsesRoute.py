@@ -1,17 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
+import json
 
 from Auth.models import User
 from Auth.Schema import UserCreate, UserResponse
 from Auth.Encrypt import hash_password
+from Auth import roles as roles_util
+from Auth.router import get_current_user
 
 from UserPassword.genarateAuto import generate_password
 from UserPassword.Template import mailTemplate
-
 from Email.SendMail import send_email
-
 from pydantic import BaseModel
+from typing import Optional, List
 
 router = APIRouter(tags=["PortAccses"])
 
@@ -20,6 +22,9 @@ class GrantAccessRequest(BaseModel):
     emp_id: str
     email: str
     role: str = "employee"
+    roles: Optional[List[str]] = None
+    can_view_salary: Optional[bool] = None
+    allowed_modules: Optional[List[str]] = None
 
 
 # -------------------------------------------------------
@@ -59,8 +64,14 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         email=user_data.email,
         password=hashed_password,
         role=user_data.role,
+        can_view_salary=user_data.can_view_salary if user_data.can_view_salary is not None else (True if user_data.role in ("admin", "hr") else False),
+        allowed_modules=json.dumps(user_data.allowed_modules) if user_data.allowed_modules else None,
         emp_id=user_data.emp_id,
     )
+    if user_data.roles:
+        roles_util.set_roles(new_user, user_data.roles)
+    else:
+        roles_util.set_roles(new_user, [user_data.role or "employee"])
 
     db.add(new_user)
     db.commit()
@@ -74,23 +85,14 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     )
 
     try:
-
         send_email(
             receiver_emails=[user_data.email],
-            subject="🔐 Your HRMS Portal Access Credentials",
+            subject="🔑 Your HRMS Portal Access Credentials",
             body=email_body,
             is_html=True,
         )
-
     except Exception as e:
-
-        db.delete(new_user)
-        db.commit()
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Email failed : {str(e)}"
-        )
+        print("Notice: Email dispatch encountered:", e)
 
     return new_user
 
@@ -135,8 +137,14 @@ async def grant_portal_access(
         email=req.email,
         password=hashed_password,
         role=req.role,
+        can_view_salary=req.can_view_salary if req.can_view_salary is not None else (True if req.role in ("admin", "hr") else False),
+        allowed_modules=json.dumps(req.allowed_modules) if req.allowed_modules else None,
         emp_id=req.emp_id,
     )
+    if req.roles:
+        roles_util.set_roles(new_user, req.roles)
+    else:
+        roles_util.set_roles(new_user, [req.role or "employee"])
 
     db.add(new_user)
     db.commit()
@@ -150,23 +158,14 @@ async def grant_portal_access(
     )
 
     try:
-
         send_email(
             receiver_emails=[req.email],
-            subject="🔐 Your HRMS Portal Access Credentials",
+            subject="🔑 Your HRMS Portal Access Credentials",
             body=email_body,
             is_html=True,
         )
-
     except Exception as e:
-
-        db.delete(new_user)
-        db.commit()
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Email failed : {str(e)}"
-        )
+        print("Notice: Email dispatch encountered:", e)
 
     return new_user
 
@@ -189,6 +188,7 @@ def get_employee_portal_status(db: Session = Depends(get_db)):
     for emp in employees:
 
         has_access = emp.Emp_id in user_map
+        u = user_map.get(emp.Emp_id)
 
         result.append({
             "Emp_id": emp.Emp_id,
@@ -198,8 +198,12 @@ def get_employee_portal_status(db: Session = Depends(get_db)):
             "designation": emp.designation,
             "dob": emp.dob.isoformat() if emp.dob else None,
             "has_portal_access": has_access,
-            "portal_email": user_map[emp.Emp_id].email if has_access else None,
-            "portal_role": user_map[emp.Emp_id].role if has_access else None,
+            "user_id": u.id if u else None,
+            "portal_email": u.email if u else None,
+            "portal_role": u.role if u else None,
+            "portal_roles": roles_util.get_roles(u) if u else [],
+            "can_view_salary": roles_util.can_view_salary(u) if u else False,
+            "allowed_modules": roles_util.get_allowed_modules(u) if u else [],
         })
 
     return result
