@@ -18,3 +18,34 @@ def get_db():
         yield db
     finally:
         db.close()
+# Auto-migrate schema on boot for SQLite & PostgreSQL
+try:
+    from sqlalchemy import text as _sa_text
+    with engine.connect() as _conn:
+        is_pg = "postgres" in str(engine.url).lower()
+        
+        try:
+            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS roles VARCHAR;" if is_pg else "ALTER TABLE users ADD COLUMN roles VARCHAR;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_salary BOOLEAN DEFAULT FALSE;" if is_pg else "ALTER TABLE users ADD COLUMN can_view_salary BOOLEAN DEFAULT 0;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_modules VARCHAR;" if is_pg else "ALTER TABLE users ADD COLUMN allowed_modules VARCHAR;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("UPDATE users SET roles = role WHERE roles IS NULL AND role IS NOT NULL;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+except Exception:
+    pass

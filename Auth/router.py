@@ -16,29 +16,46 @@ from Auth import roles as roles_util
 try:
     from sqlalchemy import text as _sa_text
     with engine.connect() as _conn:
+        is_pg = "postgres" in str(engine.url).lower()
+        
+        # 1. roles
         try:
-            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN roles VARCHAR;"))
+            if is_pg:
+                _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS roles VARCHAR;"))
+            else:
+                _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN roles VARCHAR;"))
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        # 2. can_view_salary (Postgres requires boolean literal DEFAULT FALSE, not 0)
         try:
-            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN can_view_salary BOOLEAN DEFAULT 0;"))
+            if is_pg:
+                _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_salary BOOLEAN DEFAULT FALSE;"))
+            else:
+                _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN can_view_salary BOOLEAN DEFAULT 0;"))
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        # 3. allowed_modules
         try:
-            _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN allowed_modules VARCHAR;"))
+            if is_pg:
+                _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_modules VARCHAR;"))
+            else:
+                _conn.execute(_sa_text("ALTER TABLE users ADD COLUMN allowed_modules VARCHAR;"))
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        # 4. Backfill roles
         try:
-            # Backfill roles from role if roles is null
             _conn.execute(_sa_text("UPDATE users SET roles = role WHERE roles IS NULL AND role IS NOT NULL;"))
             _conn.commit()
         except Exception:
             _conn.rollback()
-except Exception:
-    pass
+except Exception as _migration_err:
+    print("Migration check note:", _migration_err)
 
 # Router
 router = APIRouter(
