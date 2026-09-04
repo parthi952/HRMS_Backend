@@ -291,7 +291,7 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
 
         cfg = _load_config()
         m = cfg.get("microsoft", {})
-        tenant = m.get("tenant", "common")
+        tenant = m.get("tenant", "common") or "common"
         redirect_uri = f"{API_URL}/Auth/sso/callback/microsoft"
         
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -307,6 +307,25 @@ async def sso_callback_microsoft(code: str = "", state: str = "", error: str = "
                 }
             )
             tokens = token_resp.json()
+
+            # If tenant-specific endpoint failed and tenant wasn't common, retry with common
+            if "access_token" not in tokens and tenant != "common":
+                logger.warning("Token exchange with tenant %s failed: %s. Retrying with common...", tenant, tokens)
+                retry_resp = await client.post(
+                    "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                    data={
+                        "code": code,
+                        "client_id": m.get("client_id", ""),
+                        "client_secret": m.get("client_secret", ""),
+                        "redirect_uri": redirect_uri,
+                        "grant_type": "authorization_code",
+                        "scope": "openid email profile User.Read",
+                    }
+                )
+                retry_tokens = retry_resp.json()
+                if "access_token" in retry_tokens:
+                    tokens = retry_tokens
+
             if "access_token" not in tokens:
                 logger.error("Microsoft token exchange error: %s", tokens)
                 raw_err = tokens.get("error_description") or tokens.get("error") or "token_exchange_failed"
