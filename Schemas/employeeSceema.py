@@ -102,6 +102,7 @@ class EmployeeCreate(BaseModel):
     designation: str = ""
     emp_type: str = ""
     DateOfJoining: Optional[date] = None
+    device_pin: Optional[str] = ""
 
     Street: str = ""
     City: str = ""
@@ -170,6 +171,7 @@ class EmployeeResponse(BaseModel):
     emp_type: Optional[str] = ""
     DateOfJoining: Optional[date] = None
     Status: Optional[str] = "Active"
+    device_pin: Optional[str] = ""
 
     apply_esi: Optional[str] = ""
     uan_number: Optional[str] = ""

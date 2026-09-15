@@ -22,6 +22,7 @@ from routers import option, Requirement
 from contextlib import asynccontextmanager
 from Auth import router as Auth
 from EmployeePort.Atteddance.Attendance import router as employee_attendance_router
+from EmployeePort.Atteddance.BiometricDevice import router as biometric_device_router
 from EmployeePort.ActiveBatch import router as active_batch_router
 from EmployeePort.EmployeeBulkRouter import router as employee_bulk_router
 from routers.PdfRouter import router as pdf_router
@@ -173,6 +174,11 @@ app.include_router(employee_bulk_router)
 app.include_router(att.router)
 app.include_router(employee_attendance_router)
 app.include_router(active_batch_router)
+
+# Biometric fingerprint terminal (ZKTeco/eSSL ADMS push protocol) mounted at both paths
+# since firmware always calls the fixed "/iclock/..." paths regardless of any reverse-proxy prefix.
+app.include_router(biometric_device_router)
+app.include_router(biometric_device_router, prefix="/api")
 app.include_router(pdf_router)
 
 app.include_router(Leave.router)

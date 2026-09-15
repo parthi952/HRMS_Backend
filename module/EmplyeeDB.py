@@ -21,6 +21,9 @@ class Employee(Base):
     DateOfJoining = Column(Date, nullable=True)
     Status        = Column(String, default="Active")
 
+    # Biometric device enrolment (the numeric PIN/user-ID assigned on the fingerprint terminal)
+    device_pin    = Column(String, unique=True, nullable=True)
+
     # Insurance / Finance
     apply_esi          = Column(String)
     uan_number         = Column(String)

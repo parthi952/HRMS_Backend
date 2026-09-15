@@ -47,5 +47,11 @@ try:
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS device_pin VARCHAR;" if is_pg else "ALTER TABLE employees ADD COLUMN device_pin VARCHAR;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
 except Exception:
     pass
