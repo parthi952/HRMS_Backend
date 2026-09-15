@@ -16,8 +16,13 @@ import Auth.models as AuthModels
 from Auth.Encrypt import hash_password
 import Schemas.RequirementSchemas as RequirementSchemas
 from database import get_db
+from Auth.router import get_current_user
 
-router = APIRouter(prefix="/requirement", tags=["Requirement"])
+router = APIRouter(
+    prefix="/requirement",
+    tags=["Requirement"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class FinalizeOnboardingIn(BaseModel):

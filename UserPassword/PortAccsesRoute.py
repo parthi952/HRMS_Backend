@@ -15,7 +15,13 @@ from Email.SendMail import send_email
 from pydantic import BaseModel
 from typing import Optional, List
 
-router = APIRouter(tags=["PortAccses"])
+def require_admin_or_hr(current_user: User = Depends(get_current_user)) -> User:
+    if not roles_util.has_role(current_user, "admin", "hr"):
+        raise HTTPException(status_code=403, detail="HR or Admin role required")
+    return current_user
+
+
+router = APIRouter(tags=["PortAccses"], dependencies=[Depends(require_admin_or_hr)])
 
 
 class GrantAccessRequest(BaseModel):

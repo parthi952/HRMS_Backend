@@ -11,8 +11,9 @@ import module.DepartmentDB as DepartmentDB
 import module.OnboardingDB as OnboardingDB
 
 import secrets
+from Auth.router import get_current_user
 
-router = APIRouter(tags=["Dashboard"])
+router = APIRouter(tags=["Dashboard"], dependencies=[Depends(get_current_user)])
 
 
 class NewHireCreate(BaseModel):

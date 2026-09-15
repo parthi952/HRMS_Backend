@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from database import get_db
 import module.OffBoardDB as OffBoardDB
 import module.EmplyeeDB as EmplyeeDB
+from Auth.router import get_current_user
 
-router = APIRouter(tags=["Offboarding"])
+router = APIRouter(tags=["Offboarding"], dependencies=[Depends(get_current_user)])
 
 
 # ── Pydantic Schemas ──────────────────────────────────────────────────────────

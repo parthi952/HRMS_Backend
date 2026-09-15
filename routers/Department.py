@@ -4,6 +4,7 @@ from sqlalchemy import func
 from typing import List
 
 from database import get_db
+from Auth.router import get_current_user
 
 import module.DepartmentDB as DepartmentDB
 from module.EmplyeeDB import Employee
@@ -18,7 +19,8 @@ from Caluclation.IdCustom import generate_next_dep_id
 
 router = APIRouter(
     prefix="/departments",
-    tags=["Departments"]
+    tags=["Departments"],
+    dependencies=[Depends(get_current_user)],
 )
 
 

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 from module.JobPosterDB import education_Options, AI_Model, AIMode, SelectionCheckList
+from Auth.router import get_current_user
 
-router = APIRouter(tags=["Compat"])
+router = APIRouter(tags=["Compat"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/education/all")
