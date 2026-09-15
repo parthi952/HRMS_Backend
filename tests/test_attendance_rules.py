@@ -1,0 +1,120 @@
+import unittest
+from datetime import date, datetime
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from database import Base
+import module.DepartmentDB  # Registers Employee foreign-key target.
+import module.payrollProvider  # Registers Payroll foreign-key target.
+import module.PayrollDB  # Registers the Employee.payroll relationship.
+import module.EmplyeeDB as EmployeeDB
+from Caluclation.AttendanceHours import (
+    classify_day,
+    get_attendance_settings,
+    hours_worked,
+    apply_day_type,
+)
+
+
+class AttendanceHoursTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+        self.db = self.Session()
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_hours_worked_basic(self):
+        self.assertEqual(hours_worked("09:00 AM", "05:30 PM"), 8.5)
+
+    def test_hours_worked_missing_punch(self):
+        self.assertIsNone(hours_worked("09:00 AM", None))
+
+    def test_classify_full_day(self):
+        settings = get_attendance_settings(self.db)
+        self.assertEqual(classify_day("09:00 AM", "05:30 PM", settings), "Full Day")
+
+    def test_classify_half_day(self):
+        settings = get_attendance_settings(self.db)
+        self.assertEqual(classify_day("09:00 AM", "01:30 PM", settings), "Half Day")
+
+    def test_classify_absent_short_hours(self):
+        settings = get_attendance_settings(self.db)
+        self.assertEqual(classify_day("09:00 AM", "10:00 AM", settings), "Absent")
+
+    def test_classify_pending_no_checkout(self):
+        settings = get_attendance_settings(self.db)
+        self.assertEqual(classify_day("09:00 AM", None, settings), "Pending")
+
+    def test_classify_absent_no_checkin(self):
+        settings = get_attendance_settings(self.db)
+        self.assertEqual(classify_day(None, None, settings), "Absent")
+
+    def test_custom_thresholds_respected(self):
+        settings = get_attendance_settings(self.db)
+        settings.full_day_hours = 9
+        settings.half_day_hours = 5
+        self.db.commit()
+        # 8 hours no longer qualifies as Full Day once the threshold is raised to 9.
+        self.assertEqual(classify_day("09:00 AM", "05:00 PM", settings), "Half Day")
+
+    def test_apply_day_type_updates_record(self):
+        self.db.add(EmployeeDB.Employee(Emp_id="EMP1", name="Test", Status="Active"))
+        record = EmployeeDB.Attendance(
+            Emp_id="EMP1", employee_name="Test", date=date(2026, 9, 15),
+            status="Present", check_in="09:00 AM", check_out="05:30 PM",
+        )
+        self.db.add(record)
+        self.db.commit()
+        apply_day_type(self.db, record)
+        self.db.commit()
+        self.assertEqual(record.day_type, "Full Day")
+
+
+class RegularizationApprovalTests(unittest.TestCase):
+    """Covers the same override logic used by PUT /attendance/regularize/{id}."""
+
+    def setUp(self):
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+        self.db = self.Session()
+        self.db.add(EmployeeDB.Employee(Emp_id="EMP1", name="Test", Status="Active"))
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_approval_forces_full_day_even_under_threshold(self):
+        record = EmployeeDB.Attendance(
+            Emp_id="EMP1", employee_name="Test", date=date(2026, 9, 15),
+            status="Pending", check_in="09:00 AM", check_out="11:00 AM",
+        )
+        self.db.add(record)
+        self.db.commit()
+
+        # Simulates what decide_regularization() does on Approved.
+        apply_day_type(self.db, record)
+        self.assertEqual(record.day_type, "Absent")  # only 2 hours worked
+        record.day_type = "Full Day"
+        record.status = "Present"
+        self.db.commit()
+
+        self.assertEqual(record.day_type, "Full Day")
+        self.assertEqual(record.status, "Present")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -7,6 +7,7 @@ from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
 from Auth import roles as roles_util
+from Caluclation.AttendanceHours import apply_day_type
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
@@ -95,6 +96,7 @@ def update_attendance(
     if "check_in" in payload: record.check_in = payload["check_in"]
     if "check_out" in payload: record.check_out = payload["check_out"]
 
+    apply_day_type(db, record)
     db.commit()
     return {"message": "Success"}
 
@@ -195,6 +197,7 @@ def admin_check_out(payload: dict, db: Session = Depends(get_db)):
     from datetime import datetime
     now_str = datetime.now().strftime("%I:%M %p")
     record.check_out = now_str
+    apply_day_type(db, record)
     db.commit()
     return {"message": "Check-out recorded", "check_out": now_str}
 
@@ -221,6 +224,7 @@ def admin_update_attendance(payload: dict, db: Session = Depends(get_db)):
         record.check_out = payload["check_out"]
     if "status" in payload:
         record.status = payload["status"]
+    apply_day_type(db, record)
     db.commit()
     return {"message": "Attendance updated"}
 
@@ -256,6 +260,7 @@ def bulk_upsert_attendance(records: list, db: Session = Depends(get_db)):
             record.check_out = rec["check_out"]
         if "status" in rec:
             record.status = rec["status"]
+        apply_day_type(db, record)
         count += 1
     db.commit()
     return {"message": f"{count} attendance records saved"}

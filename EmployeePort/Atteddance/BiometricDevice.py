@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query, Request, Response
 
 import module.EmplyeeDB as EmplyeeDB
 from database import SessionLocal
+from Caluclation.AttendanceHours import apply_day_type
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +41,16 @@ def _apply_punch(db, device_pin: str, punched_at: datetime) -> bool:
     ).first()
 
     if not record:
-        db.add(EmplyeeDB.Attendance(
+        record = EmplyeeDB.Attendance(
             Emp_id=employee.Emp_id,
             employee_name=employee.name,
             date=punch_date,
             status="Present",
             check_in=time_str,
             check_out=None,
-        ))
+        )
+        db.add(record)
+        apply_day_type(db, record)
         return True
 
     if not record.check_in:
@@ -56,6 +59,7 @@ def _apply_punch(db, device_pin: str, punched_at: datetime) -> bool:
     else:
         # Later punch the same day is treated as the check-out.
         record.check_out = time_str
+    apply_day_type(db, record)
     return True
 
 

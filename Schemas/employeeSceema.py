@@ -238,6 +238,20 @@ class AttendanceCreate(BaseModel):
     status: str
 
 
+class AttendanceSettingsUpdate(BaseModel):
+    full_day_hours: float
+    half_day_hours: float
+
+
+class RegularizationRequest(BaseModel):
+    Emp_id: str
+    employee_name: Optional[str] = None
+    date: date
+    reason: str
+    requested_check_in: Optional[str] = None
+    requested_check_out: Optional[str] = None
+
+
 class Leave(BaseModel):
     Emp_id: str
     status: str

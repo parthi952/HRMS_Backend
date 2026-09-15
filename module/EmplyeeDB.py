@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -136,7 +136,38 @@ class Attendance(Base):
     status        = Column(String, nullable=False)
     employee_name = Column(String)
 
+    # Derived from check_in/check_out against AttendanceSettings' thresholds:
+    # "Full Day", "Half Day", "Absent", or "Pending" (no check-out yet).
+    # Set to "Full Day" directly when a regularization request is approved.
+    day_type      = Column(String, nullable=True, default="Pending")
+
     employee = relationship("Employee", back_populates="attendance_records")
+
+
+class AttendanceSettings(Base):
+    __tablename__ = "attendance_settings"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    full_day_hours  = Column(Float, nullable=False, default=8.5)
+    half_day_hours  = Column(Float, nullable=False, default=4.0)
+
+
+class AttendanceRegularization(Base):
+    __tablename__ = "attendance_regularizations"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    Emp_id              = Column(String, ForeignKey("employees.Emp_id"), nullable=False)
+    employee_name       = Column(String)
+    date                = Column(Date, nullable=False)
+    reason              = Column(String, nullable=False)
+    requested_check_in  = Column(String, nullable=True)
+    requested_check_out = Column(String, nullable=True)
+    status              = Column(String, nullable=False, default="Pending")  # Pending / Approved / Rejected
+    created_at          = Column(DateTime, nullable=False)
+    decided_by          = Column(String, nullable=True)
+    decided_at          = Column(DateTime, nullable=True)
+
+    employee = relationship("Employee")
 
 
 class LeaveDB(Base):

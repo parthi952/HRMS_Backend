@@ -6,6 +6,7 @@ import module.EmplyeeDB as EmplyeeDB
 from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
+from Caluclation.AttendanceHours import apply_day_type
 
 router = APIRouter(prefix="/employee-attendance", tags=["Employee Attendance"])
 
@@ -63,6 +64,7 @@ def get_today_attendance_status(
         "check_in": record.check_in,
         "check_out": record.check_out,
         "status": record.status,
+        "day_type": record.day_type,
         "clocked_in": record.check_in is not None and record.check_out is None
     }
 
@@ -161,7 +163,8 @@ def check_out(
         
     current_time_str = datetime.now().strftime("%I:%M %p")
     record.check_out = current_time_str
-    
+    apply_day_type(db, record)
+
     try:
         db.commit()
         db.refresh(record)
@@ -171,9 +174,10 @@ def check_out(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
-        
+
     return {
         "message": "Successfully checked out",
         "check_out": record.check_out,
-        "status": record.status
+        "status": record.status,
+        "day_type": record.day_type
     }

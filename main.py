@@ -17,6 +17,7 @@ from routers import (CustomID, Department,
 )
 from Caluclation import Currency
 from routers import Attendance as att
+from routers import AttendanceRegularization as att_regularization
 from routers import Leave
 from routers import option, Requirement
 from contextlib import asynccontextmanager
@@ -172,6 +173,7 @@ app.include_router(employee_bulk_router)
 
 # attendance router
 app.include_router(att.router)
+app.include_router(att_regularization.router)
 app.include_router(employee_attendance_router)
 app.include_router(active_batch_router)
 

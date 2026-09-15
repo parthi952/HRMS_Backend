@@ -53,5 +53,11 @@ try:
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE attendance ADD COLUMN IF NOT EXISTS day_type VARCHAR DEFAULT 'Pending';" if is_pg else "ALTER TABLE attendance ADD COLUMN day_type VARCHAR DEFAULT 'Pending';"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
 except Exception:
     pass

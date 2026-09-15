@@ -1,0 +1,61 @@
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+import module.EmplyeeDB as EmplyeeDB
+
+_TIME_FORMAT = "%I:%M %p"
+
+
+def parse_punch_time(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value.strip(), _TIME_FORMAT)
+    except ValueError:
+        return None
+
+
+def hours_worked(check_in: Optional[str], check_out: Optional[str]) -> Optional[float]:
+    """Hours between check-in and check-out on the same day. None if either is missing/unparsable."""
+    start = parse_punch_time(check_in)
+    end = parse_punch_time(check_out)
+    if not start or not end:
+        return None
+    delta = (end - start).total_seconds() / 3600
+    if delta < 0:
+        # Handles a check-out logged just after midnight relative to check-in.
+        delta += 24
+    return round(delta, 2)
+
+
+def get_attendance_settings(db: Session) -> EmplyeeDB.AttendanceSettings:
+    settings = db.query(EmplyeeDB.AttendanceSettings).first()
+    if not settings:
+        settings = EmplyeeDB.AttendanceSettings(full_day_hours=8.5, half_day_hours=4.0)
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings
+
+
+def classify_day(check_in: Optional[str], check_out: Optional[str], settings: EmplyeeDB.AttendanceSettings) -> str:
+    if not check_in:
+        return "Absent"
+    if not check_out:
+        return "Pending"
+    worked = hours_worked(check_in, check_out)
+    if worked is None:
+        return "Pending"
+    if worked >= settings.full_day_hours:
+        return "Full Day"
+    if worked >= settings.half_day_hours:
+        return "Half Day"
+    return "Absent"
+
+
+def apply_day_type(db: Session, record: EmplyeeDB.Attendance) -> None:
+    """Recompute and set day_type on an Attendance row from its current check_in/check_out."""
+    settings = get_attendance_settings(db)
+    record.day_type = classify_day(record.check_in, record.check_out, settings)
