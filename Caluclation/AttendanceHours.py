@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date as date_type, datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -6,6 +6,11 @@ from sqlalchemy.orm import Session
 import module.EmplyeeDB as EmplyeeDB
 
 _TIME_FORMAT = "%I:%M %p"
+
+
+def is_weekly_off(day: date_type, settings: EmplyeeDB.AttendanceSettings) -> bool:
+    off_days = {d.strip().lower() for d in (settings.weekly_off_days or "").split(",") if d.strip()}
+    return day.strftime("%A").lower() in off_days
 
 
 def parse_punch_time(value: Optional[str]) -> Optional[datetime]:
@@ -33,14 +38,24 @@ def hours_worked(check_in: Optional[str], check_out: Optional[str]) -> Optional[
 def get_attendance_settings(db: Session) -> EmplyeeDB.AttendanceSettings:
     settings = db.query(EmplyeeDB.AttendanceSettings).first()
     if not settings:
-        settings = EmplyeeDB.AttendanceSettings(full_day_hours=8.5, half_day_hours=4.0)
+        settings = EmplyeeDB.AttendanceSettings(
+            full_day_hours=8.5, half_day_hours=4.0,
+            shift_start="09:30 AM", shift_end="06:30 PM", weekly_off_days="Sunday",
+        )
         db.add(settings)
         db.commit()
         db.refresh(settings)
     return settings
 
 
-def classify_day(check_in: Optional[str], check_out: Optional[str], settings: EmplyeeDB.AttendanceSettings) -> str:
+def classify_day(
+    check_in: Optional[str],
+    check_out: Optional[str],
+    settings: EmplyeeDB.AttendanceSettings,
+    day: Optional[date_type] = None,
+) -> str:
+    if day is not None and is_weekly_off(day, settings):
+        return "Week Off"
     if not check_in:
         return "Absent"
     if not check_out:
@@ -58,4 +73,4 @@ def classify_day(check_in: Optional[str], check_out: Optional[str], settings: Em
 def apply_day_type(db: Session, record: EmplyeeDB.Attendance) -> None:
     """Recompute and set day_type on an Attendance row from its current check_in/check_out."""
     settings = get_attendance_settings(db)
-    record.day_type = classify_day(record.check_in, record.check_out, settings)
+    record.day_type = classify_day(record.check_in, record.check_out, settings, record.date)

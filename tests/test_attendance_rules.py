@@ -15,6 +15,7 @@ from Caluclation.AttendanceHours import (
     get_attendance_settings,
     hours_worked,
     apply_day_type,
+    is_weekly_off,
 )
 
 
@@ -65,6 +66,30 @@ class AttendanceHoursTests(unittest.TestCase):
         self.db.commit()
         # 8 hours no longer qualifies as Full Day once the threshold is raised to 9.
         self.assertEqual(classify_day("09:00 AM", "05:00 PM", settings), "Half Day")
+
+    def test_sunday_is_week_off_by_default(self):
+        settings = get_attendance_settings(self.db)
+        sunday = date(2026, 9, 13)  # a Sunday
+        self.assertTrue(is_weekly_off(sunday, settings))
+        self.assertEqual(classify_day("09:30 AM", None, settings, day=sunday), "Week Off")
+
+    def test_saturday_is_a_working_day_by_default(self):
+        settings = get_attendance_settings(self.db)
+        saturday = date(2026, 9, 12)
+        self.assertFalse(is_weekly_off(saturday, settings))
+        self.assertEqual(classify_day(None, None, settings, day=saturday), "Absent")
+
+    def test_apply_day_type_marks_week_off_record(self):
+        self.db.add(EmployeeDB.Employee(Emp_id="EMP1", name="Test", Status="Active"))
+        record = EmployeeDB.Attendance(
+            Emp_id="EMP1", employee_name="Test", date=date(2026, 9, 13),  # Sunday
+            status="Pending", check_in=None, check_out=None,
+        )
+        self.db.add(record)
+        self.db.commit()
+        apply_day_type(self.db, record)
+        self.db.commit()
+        self.assertEqual(record.day_type, "Week Off")
 
     def test_apply_day_type_updates_record(self):
         self.db.add(EmployeeDB.Employee(Emp_id="EMP1", name="Test", Status="Active"))

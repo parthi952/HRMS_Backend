@@ -150,6 +150,11 @@ class AttendanceSettings(Base):
     id              = Column(Integer, primary_key=True, index=True)
     full_day_hours  = Column(Float, nullable=False, default=8.5)
     half_day_hours  = Column(Float, nullable=False, default=4.0)
+    shift_start     = Column(String, nullable=False, default="09:30 AM")
+    shift_end       = Column(String, nullable=False, default="06:30 PM")
+    # Comma-separated day names (e.g. "Sunday") that are the weekly off - never
+    # counted as Absent/Pending and excluded from regularization eligibility.
+    weekly_off_days = Column(String, nullable=False, default="Sunday")
 
 
 class AttendanceRegularization(Base):

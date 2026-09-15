@@ -241,6 +241,9 @@ class AttendanceCreate(BaseModel):
 class AttendanceSettingsUpdate(BaseModel):
     full_day_hours: float
     half_day_hours: float
+    shift_start: str = "09:30 AM"
+    shift_end: str = "06:30 PM"
+    weekly_off_days: str = "Sunday"
 
 
 class RegularizationRequest(BaseModel):

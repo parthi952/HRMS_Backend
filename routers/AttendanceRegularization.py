@@ -9,7 +9,7 @@ from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
 from Auth import roles as roles_util
-from Caluclation.AttendanceHours import get_attendance_settings, apply_day_type
+from Caluclation.AttendanceHours import get_attendance_settings, apply_day_type, is_weekly_off
 
 router = APIRouter(prefix="/attendance", tags=["Attendance Regularization"])
 
@@ -23,10 +23,19 @@ def _is_approver(current_user: User) -> bool:
 
 # ─── Settings (customizable full-day / half-day hour thresholds) ─────────────
 
+def _settings_dict(settings: EmplyeeDB.AttendanceSettings) -> dict:
+    return {
+        "full_day_hours": settings.full_day_hours,
+        "half_day_hours": settings.half_day_hours,
+        "shift_start": settings.shift_start,
+        "shift_end": settings.shift_end,
+        "weekly_off_days": settings.weekly_off_days,
+    }
+
+
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    settings = get_attendance_settings(db)
-    return {"full_day_hours": settings.full_day_hours, "half_day_hours": settings.half_day_hours}
+    return _settings_dict(get_attendance_settings(db))
 
 
 @router.put("/settings")
@@ -43,8 +52,11 @@ def update_settings(
     settings = get_attendance_settings(db)
     settings.full_day_hours = payload.full_day_hours
     settings.half_day_hours = payload.half_day_hours
+    settings.shift_start = payload.shift_start
+    settings.shift_end = payload.shift_end
+    settings.weekly_off_days = payload.weekly_off_days
     db.commit()
-    return {"message": "Attendance rules updated", "full_day_hours": settings.full_day_hours, "half_day_hours": settings.half_day_hours}
+    return {"message": "Attendance rules updated", **_settings_dict(settings)}
 
 
 # ─── Employee: submit / view own regularization requests ─────────────────────
@@ -59,6 +71,8 @@ def submit_regularization(
         raise HTTPException(status_code=403, detail="You can only request regularization for your own attendance.")
     if payload.date > date_type.today():
         raise HTTPException(status_code=400, detail="Cannot request regularization for a future date")
+    if is_weekly_off(payload.date, get_attendance_settings(db)):
+        raise HTTPException(status_code=400, detail="This date is a weekly off - no regularization needed")
 
     existing_pending = db.query(EmplyeeDB.AttendanceRegularization).filter(
         EmplyeeDB.AttendanceRegularization.Emp_id == payload.Emp_id,

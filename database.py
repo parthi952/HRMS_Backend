@@ -59,5 +59,23 @@ try:
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE attendance_settings ADD COLUMN IF NOT EXISTS shift_start VARCHAR DEFAULT '09:30 AM';" if is_pg else "ALTER TABLE attendance_settings ADD COLUMN shift_start VARCHAR DEFAULT '09:30 AM';"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE attendance_settings ADD COLUMN IF NOT EXISTS shift_end VARCHAR DEFAULT '06:30 PM';" if is_pg else "ALTER TABLE attendance_settings ADD COLUMN shift_end VARCHAR DEFAULT '06:30 PM';"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE attendance_settings ADD COLUMN IF NOT EXISTS weekly_off_days VARCHAR DEFAULT 'Sunday';" if is_pg else "ALTER TABLE attendance_settings ADD COLUMN weekly_off_days VARCHAR DEFAULT 'Sunday';"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
 except Exception:
     pass
