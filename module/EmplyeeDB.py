@@ -24,6 +24,9 @@ class Employee(Base):
     # Biometric device enrolment (the numeric PIN/user-ID assigned on the fingerprint terminal)
     device_pin    = Column(String, unique=True, nullable=True)
 
+    # Shift roster assignment. Null falls back to AttendanceSettings' global Full/Half Day hours.
+    shift_id      = Column(Integer, ForeignKey("shifts.id"), nullable=True)
+
     # Insurance / Finance
     apply_esi          = Column(String)
     uan_number         = Column(String)
@@ -142,6 +145,19 @@ class Attendance(Base):
     day_type      = Column(String, nullable=True, default="Pending")
 
     employee = relationship("Employee", back_populates="attendance_records")
+
+
+class Shift(Base):
+    __tablename__ = "shifts"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    name            = Column(String, nullable=False)
+    start_time      = Column(String, nullable=False)  # e.g. "10:00 AM"
+    end_time        = Column(String, nullable=False)  # e.g. "07:00 PM"
+    full_day_hours  = Column(Float, nullable=False, default=8.5)
+    half_day_hours  = Column(Float, nullable=False, default=4.0)
+
+    employees = relationship("Employee", backref="shift")
 
 
 class AttendanceSettings(Base):

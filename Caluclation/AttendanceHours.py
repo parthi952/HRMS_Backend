@@ -53,6 +53,7 @@ def classify_day(
     check_out: Optional[str],
     settings: EmplyeeDB.AttendanceSettings,
     day: Optional[date_type] = None,
+    shift: Optional[EmplyeeDB.Shift] = None,
 ) -> str:
     if day is not None and is_weekly_off(day, settings):
         return "Week Off"
@@ -63,14 +64,24 @@ def classify_day(
     worked = hours_worked(check_in, check_out)
     if worked is None:
         return "Pending"
-    if worked >= settings.full_day_hours:
+    full_day_hours = shift.full_day_hours if shift else settings.full_day_hours
+    half_day_hours = shift.half_day_hours if shift else settings.half_day_hours
+    if worked >= full_day_hours:
         return "Full Day"
-    if worked >= settings.half_day_hours:
+    if worked >= half_day_hours:
         return "Half Day"
     return "Absent"
 
 
 def apply_day_type(db: Session, record: EmplyeeDB.Attendance) -> None:
-    """Recompute and set day_type on an Attendance row from its current check_in/check_out."""
+    """Recompute and set day_type on an Attendance row from its current check_in/check_out.
+
+    Uses the employee's assigned shift's Full/Half Day hour thresholds when they
+    have one, otherwise falls back to the global AttendanceSettings thresholds.
+    """
     settings = get_attendance_settings(db)
-    record.day_type = classify_day(record.check_in, record.check_out, settings, record.date)
+    employee = db.query(EmplyeeDB.Employee).filter(EmplyeeDB.Employee.Emp_id == record.Emp_id).first()
+    shift = None
+    if employee and employee.shift_id:
+        shift = db.query(EmplyeeDB.Shift).filter(EmplyeeDB.Shift.id == employee.shift_id).first()
+    record.day_type = classify_day(record.check_in, record.check_out, settings, record.date, shift)

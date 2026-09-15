@@ -77,5 +77,11 @@ try:
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_id INTEGER;" if is_pg else "ALTER TABLE employees ADD COLUMN shift_id INTEGER;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
 except Exception:
     pass

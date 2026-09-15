@@ -79,6 +79,28 @@ class AttendanceHoursTests(unittest.TestCase):
         self.assertFalse(is_weekly_off(saturday, settings))
         self.assertEqual(classify_day(None, None, settings, day=saturday), "Absent")
 
+    def test_shift_overrides_global_thresholds(self):
+        settings = get_attendance_settings(self.db)  # global: full 8.5, half 4
+        shift = EmployeeDB.Shift(name="Early Shift", start_time="09:00 AM", end_time="06:00 PM", full_day_hours=9, half_day_hours=5)
+        # 8.5 hours would be Full Day globally, but Half Day under a 9h shift.
+        self.assertEqual(classify_day("09:00 AM", "05:30 PM", settings, shift=shift), "Half Day")
+        self.assertEqual(classify_day("09:00 AM", "06:00 PM", settings, shift=shift), "Full Day")
+
+    def test_apply_day_type_uses_employees_assigned_shift(self):
+        shift = EmployeeDB.Shift(name="Early Shift", start_time="09:00 AM", end_time="06:00 PM", full_day_hours=9, half_day_hours=5)
+        self.db.add(shift)
+        self.db.commit()
+        self.db.add(EmployeeDB.Employee(Emp_id="EMP2", name="Shifted", Status="Active", shift_id=shift.id))
+        record = EmployeeDB.Attendance(
+            Emp_id="EMP2", employee_name="Shifted", date=date(2026, 9, 15),
+            status="Present", check_in="09:00 AM", check_out="05:30 PM",  # 8.5h
+        )
+        self.db.add(record)
+        self.db.commit()
+        apply_day_type(self.db, record)
+        self.db.commit()
+        self.assertEqual(record.day_type, "Half Day")  # would be Full Day without the shift override
+
     def test_apply_day_type_marks_week_off_record(self):
         self.db.add(EmployeeDB.Employee(Emp_id="EMP1", name="Test", Status="Active"))
         record = EmployeeDB.Attendance(
