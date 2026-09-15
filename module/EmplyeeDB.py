@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Float, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -144,7 +144,22 @@ class Attendance(Base):
     # Set to "Full Day" directly when a regularization request is approved.
     day_type      = Column(String, nullable=True, default="Pending")
 
+    # Serial number of the biometric terminal that last punched this record (nullable —
+    # manual/admin check-ins don't come from a device).
+    device_serial = Column(String, nullable=True)
+
     employee = relationship("Employee", back_populates="attendance_records")
+
+
+class BiometricDevice(Base):
+    __tablename__ = "biometric_devices"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    name            = Column(String, nullable=False)     # e.g. "Chennai HO - Main Entrance"
+    location        = Column(String, nullable=True)       # e.g. "Chennai"
+    serial_number   = Column(String, unique=True, nullable=False)
+    is_active       = Column(Boolean, nullable=False, default=True)
+    last_seen       = Column(DateTime, nullable=True)
 
 
 class Shift(Base):

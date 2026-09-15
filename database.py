@@ -83,5 +83,11 @@ try:
             _conn.commit()
         except Exception:
             _conn.rollback()
+
+        try:
+            _conn.execute(_sa_text("ALTER TABLE attendance ADD COLUMN IF NOT EXISTS device_serial VARCHAR;" if is_pg else "ALTER TABLE attendance ADD COLUMN device_serial VARCHAR;"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
 except Exception:
     pass

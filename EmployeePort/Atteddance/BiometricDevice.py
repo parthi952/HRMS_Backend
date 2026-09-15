@@ -12,18 +12,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/iclock", tags=["Biometric Device"])
 
-# Comma-separated list of device serial numbers allowed to push data.
-# Leave BIOMETRIC_DEVICE_SERIALS unset to accept any device (fine for a single office terminal).
-_ALLOWED_SERIALS = {
+# Optional comma-separated allowlist for a single-device setup that predates the
+# device registry below. Kept for backward compatibility - new setups should
+# register devices via /biometric-devices instead.
+_ENV_ALLOWED_SERIALS = {
     s.strip() for s in os.getenv("BIOMETRIC_DEVICE_SERIALS", "").split(",") if s.strip()
 }
 
 
-def _device_allowed(serial: str) -> bool:
-    return not _ALLOWED_SERIALS or serial in _ALLOWED_SERIALS
+def _device_allowed(db, serial: str) -> bool:
+    if serial in _ENV_ALLOWED_SERIALS:
+        return True
+    has_registered_devices = db.query(EmplyeeDB.BiometricDevice).count() > 0
+    if not has_registered_devices:
+        # No registry configured yet - accept any device (matches the original
+        # single-terminal behavior so existing setups keep working).
+        return True
+    return db.query(EmplyeeDB.BiometricDevice).filter(
+        EmplyeeDB.BiometricDevice.serial_number == serial,
+        EmplyeeDB.BiometricDevice.is_active.is_(True),
+    ).first() is not None
 
 
-def _apply_punch(db, device_pin: str, punched_at: datetime) -> bool:
+def _touch_device(db, serial: str) -> None:
+    device = db.query(EmplyeeDB.BiometricDevice).filter(
+        EmplyeeDB.BiometricDevice.serial_number == serial
+    ).first()
+    if device:
+        device.last_seen = datetime.now()
+
+
+def _apply_punch(db, device_pin: str, punched_at: datetime, device_serial: str = "") -> bool:
     """Map a raw fingerprint punch to check-in/check-out on the day's attendance record."""
     employee = db.query(EmplyeeDB.Employee).filter(
         EmplyeeDB.Employee.device_pin == device_pin
@@ -48,6 +67,7 @@ def _apply_punch(db, device_pin: str, punched_at: datetime) -> bool:
             status="Present",
             check_in=time_str,
             check_out=None,
+            device_serial=device_serial or None,
         )
         db.add(record)
         apply_day_type(db, record)
@@ -59,6 +79,8 @@ def _apply_punch(db, device_pin: str, punched_at: datetime) -> bool:
     else:
         # Later punch the same day is treated as the check-out.
         record.check_out = time_str
+    if device_serial:
+        record.device_serial = device_serial
     apply_day_type(db, record)
     return True
 
@@ -66,8 +88,14 @@ def _apply_punch(db, device_pin: str, punched_at: datetime) -> bool:
 @router.get("/cdata")
 def device_handshake(SN: str = Query(default="")):
     """Initial handshake a ZKTeco/eSSL ADMS-compatible terminal makes on boot / reconnect."""
-    if not _device_allowed(SN):
-        return Response(content="", status_code=403)
+    db = SessionLocal()
+    try:
+        if not _device_allowed(db, SN):
+            return Response(content="", status_code=403)
+        _touch_device(db, SN)
+        db.commit()
+    finally:
+        db.close()
 
     body = (
         f"GET OPTION FROM: {SN}\n"
@@ -85,18 +113,20 @@ def device_handshake(SN: str = Query(default="")):
 @router.post("/cdata")
 async def device_push(request: Request, SN: str = Query(default=""), table: str = Query(default="")):
     """Receives ATTLOG (punch) and OPERLOG (user enrolment) pushes from the device."""
-    if not _device_allowed(SN):
-        return Response(content="", status_code=403)
-
     raw = (await request.body()).decode("utf-8", errors="ignore")
-
-    if table.upper() != "ATTLOG":
-        # Not a punch batch (e.g. OPERLOG user sync) - acknowledge without processing.
-        return Response(content="OK", media_type="text/plain")
 
     db = SessionLocal()
     processed = 0
     try:
+        if not _device_allowed(db, SN):
+            return Response(content="", status_code=403)
+        _touch_device(db, SN)
+
+        if table.upper() != "ATTLOG":
+            # Not a punch batch (e.g. OPERLOG user sync) - acknowledge without processing.
+            db.commit()
+            return Response(content="OK", media_type="text/plain")
+
         for line in raw.splitlines():
             line = line.strip()
             if not line:
@@ -109,7 +139,7 @@ async def device_push(request: Request, SN: str = Query(default=""), table: str 
                 punched_at = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
             except ValueError:
                 continue
-            if _apply_punch(db, device_pin, punched_at):
+            if _apply_punch(db, device_pin, punched_at, SN):
                 processed += 1
         db.commit()
     except Exception:

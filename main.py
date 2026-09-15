@@ -19,12 +19,14 @@ from Caluclation import Currency
 from routers import Attendance as att
 from routers import AttendanceRegularization as att_regularization
 from routers import Shifts as shifts_router
+from routers import AttendanceReport as attendance_report_router
 from routers import Leave
 from routers import option, Requirement
 from contextlib import asynccontextmanager
 from Auth import router as Auth
 from EmployeePort.Atteddance.Attendance import router as employee_attendance_router
 from EmployeePort.Atteddance.BiometricDevice import router as biometric_device_router
+from routers.BiometricDevices import router as biometric_devices_registry_router
 from EmployeePort.ActiveBatch import router as active_batch_router
 from EmployeePort.EmployeeBulkRouter import router as employee_bulk_router
 from routers.PdfRouter import router as pdf_router
@@ -176,6 +178,7 @@ app.include_router(employee_bulk_router)
 app.include_router(att.router)
 app.include_router(att_regularization.router)
 app.include_router(shifts_router.router)
+app.include_router(attendance_report_router.router)
 app.include_router(employee_attendance_router)
 app.include_router(active_batch_router)
 
@@ -183,6 +186,7 @@ app.include_router(active_batch_router)
 # since firmware always calls the fixed "/iclock/..." paths regardless of any reverse-proxy prefix.
 app.include_router(biometric_device_router)
 app.include_router(biometric_device_router, prefix="/api")
+app.include_router(biometric_devices_registry_router)
 app.include_router(pdf_router)
 
 app.include_router(Leave.router)
