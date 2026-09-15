@@ -13,6 +13,16 @@ def is_weekly_off(day: date_type, settings: EmplyeeDB.AttendanceSettings) -> boo
     return day.strftime("%A").lower() in off_days
 
 
+def is_on_approved_leave(db: Session, emp_id: str, day: date_type) -> bool:
+    day_str = day.isoformat()
+    return db.query(EmplyeeDB.LeaveHistoryDB).filter(
+        EmplyeeDB.LeaveHistoryDB.Emp_id == emp_id,
+        EmplyeeDB.LeaveHistoryDB.status == "Approved",
+        EmplyeeDB.LeaveHistoryDB.from_date <= day_str,
+        EmplyeeDB.LeaveHistoryDB.to_date >= day_str,
+    ).first() is not None
+
+
 def parse_punch_time(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -54,9 +64,12 @@ def classify_day(
     settings: EmplyeeDB.AttendanceSettings,
     day: Optional[date_type] = None,
     shift: Optional[EmplyeeDB.Shift] = None,
+    on_leave: bool = False,
 ) -> str:
     if day is not None and is_weekly_off(day, settings):
         return "Week Off"
+    if on_leave:
+        return "Leave"
     if not check_in:
         return "Absent"
     if not check_out:
@@ -84,4 +97,5 @@ def apply_day_type(db: Session, record: EmplyeeDB.Attendance) -> None:
     shift = None
     if employee and employee.shift_id:
         shift = db.query(EmplyeeDB.Shift).filter(EmplyeeDB.Shift.id == employee.shift_id).first()
-    record.day_type = classify_day(record.check_in, record.check_out, settings, record.date, shift)
+    on_leave = is_on_approved_leave(db, record.Emp_id, record.date)
+    record.day_type = classify_day(record.check_in, record.check_out, settings, record.date, shift, on_leave)

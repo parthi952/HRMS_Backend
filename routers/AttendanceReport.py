@@ -44,7 +44,7 @@ def attendance_summary(
             "Emp_id": emp_id,
             "employee_name": emp.name,
             "Department": emp.Department,
-            "full_day": 0, "half_day": 0, "absent": 0, "week_off": 0, "pending": 0,
+            "full_day": 0, "half_day": 0, "absent": 0, "week_off": 0, "leave": 0, "pending": 0,
             "total_hours": 0.0,
         }
         for emp_id, emp in emp_by_id.items()
@@ -63,6 +63,8 @@ def attendance_summary(
             row["absent"] += 1
         elif day_type == "Week Off":
             row["week_off"] += 1
+        elif day_type == "Leave":
+            row["leave"] += 1
         else:
             row["pending"] += 1
 

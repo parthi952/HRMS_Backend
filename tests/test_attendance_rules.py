@@ -16,6 +16,7 @@ from Caluclation.AttendanceHours import (
     hours_worked,
     apply_day_type,
     is_weekly_off,
+    is_on_approved_leave,
 )
 
 
@@ -78,6 +79,48 @@ class AttendanceHoursTests(unittest.TestCase):
         saturday = date(2026, 9, 12)
         self.assertFalse(is_weekly_off(saturday, settings))
         self.assertEqual(classify_day(None, None, settings, day=saturday), "Absent")
+
+    def test_classify_day_leave_overrides_absent(self):
+        settings = get_attendance_settings(self.db)
+        self.assertEqual(classify_day(None, None, settings, on_leave=True), "Leave")
+
+    def test_is_on_approved_leave_true_within_range(self):
+        self.db.add(EmployeeDB.Employee(Emp_id="EMP3", name="Leaver", Status="Active"))
+        self.db.add(EmployeeDB.LeaveHistoryDB(
+            Emp_id="EMP3", employee_name="Leaver", Duration="2026-09-10 to 2026-09-12",
+            from_date="2026-09-10", to_date="2026-09-12", Days=3, applayDate="2026-09-01",
+            leave_type="Casual", status="Approved",
+        ))
+        self.db.commit()
+        self.assertTrue(is_on_approved_leave(self.db, "EMP3", date(2026, 9, 11)))
+        self.assertFalse(is_on_approved_leave(self.db, "EMP3", date(2026, 9, 13)))
+
+    def test_is_on_approved_leave_false_when_pending(self):
+        self.db.add(EmployeeDB.Employee(Emp_id="EMP4", name="Pending Leaver", Status="Active"))
+        self.db.add(EmployeeDB.LeaveHistoryDB(
+            Emp_id="EMP4", employee_name="Pending Leaver", Duration="2026-09-10 to 2026-09-12",
+            from_date="2026-09-10", to_date="2026-09-12", Days=3, applayDate="2026-09-01",
+            leave_type="Casual", status="Pending",
+        ))
+        self.db.commit()
+        self.assertFalse(is_on_approved_leave(self.db, "EMP4", date(2026, 9, 11)))
+
+    def test_apply_day_type_marks_approved_leave_day(self):
+        self.db.add(EmployeeDB.Employee(Emp_id="EMP5", name="OnLeave", Status="Active"))
+        self.db.add(EmployeeDB.LeaveHistoryDB(
+            Emp_id="EMP5", employee_name="OnLeave", Duration="2026-09-16 to 2026-09-16",
+            from_date="2026-09-16", to_date="2026-09-16", Days=1, applayDate="2026-09-01",
+            leave_type="Sick", status="Approved",
+        ))
+        record = EmployeeDB.Attendance(
+            Emp_id="EMP5", employee_name="OnLeave", date=date(2026, 9, 16),
+            status="Pending", check_in=None, check_out=None,
+        )
+        self.db.add(record)
+        self.db.commit()
+        apply_day_type(self.db, record)
+        self.db.commit()
+        self.assertEqual(record.day_type, "Leave")
 
     def test_shift_overrides_global_thresholds(self):
         settings = get_attendance_settings(self.db)  # global: full 8.5, half 4

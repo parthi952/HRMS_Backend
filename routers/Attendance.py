@@ -7,7 +7,7 @@ from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
 from Auth import roles as roles_util
-from Caluclation.AttendanceHours import apply_day_type, get_attendance_settings, is_weekly_off
+from Caluclation.AttendanceHours import apply_day_type
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
@@ -40,9 +40,6 @@ def get_attendance(
     # Map for quick lookup
     existing_emp_ids = {r.Emp_id for r in existing_records}
 
-    settings = get_attendance_settings(db)
-    day_type = "Week Off" if is_weekly_off(attendance_date, settings) else "Pending"
-
     # 3. Create missing records for active employees
     new_records_added = False
     for emp in active_employees:
@@ -54,9 +51,9 @@ def get_attendance(
                 status="Pending",
                 check_in=None,
                 check_out=None,
-                day_type=day_type,
             )
             db.add(new_record)
+            apply_day_type(db, new_record)
             new_records_added = True
     
     if new_records_added:

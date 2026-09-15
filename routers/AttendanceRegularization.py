@@ -9,7 +9,7 @@ from database import get_db
 from Auth.router import get_current_user
 from Auth.models import User
 from Auth import roles as roles_util
-from Caluclation.AttendanceHours import get_attendance_settings, apply_day_type, is_weekly_off
+from Caluclation.AttendanceHours import get_attendance_settings, apply_day_type, is_weekly_off, is_on_approved_leave
 
 router = APIRouter(prefix="/attendance", tags=["Attendance Regularization"])
 
@@ -73,6 +73,8 @@ def submit_regularization(
         raise HTTPException(status_code=400, detail="Cannot request regularization for a future date")
     if is_weekly_off(payload.date, get_attendance_settings(db)):
         raise HTTPException(status_code=400, detail="This date is a weekly off - no regularization needed")
+    if is_on_approved_leave(db, payload.Emp_id, payload.date):
+        raise HTTPException(status_code=400, detail="This date is covered by approved leave - no regularization needed")
 
     existing_pending = db.query(EmplyeeDB.AttendanceRegularization).filter(
         EmplyeeDB.AttendanceRegularization.Emp_id == payload.Emp_id,
