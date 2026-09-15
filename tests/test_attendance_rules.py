@@ -56,9 +56,17 @@ class AttendanceHoursTests(unittest.TestCase):
         settings = get_attendance_settings(self.db)
         self.assertEqual(classify_day("09:00 AM", None, settings), "Pending")
 
-    def test_classify_absent_no_checkin(self):
+    def test_classify_absent_no_checkin_past_day(self):
         settings = get_attendance_settings(self.db)
-        self.assertEqual(classify_day(None, None, settings), "Absent")
+        past_day = date(2020, 1, 6)  # a Monday, safely in the past
+        self.assertEqual(classify_day(None, None, settings, day=past_day), "Absent")
+
+    def test_classify_pending_no_checkin_today_or_unknown_day(self):
+        settings = get_attendance_settings(self.db)
+        # No check-in yet, but the day isn't known to be over - stays Pending,
+        # not Absent, so an ongoing/unspecified day doesn't get penalized early.
+        self.assertEqual(classify_day(None, None, settings), "Pending")
+        self.assertEqual(classify_day(None, None, settings, day=date.today()), "Pending")
 
     def test_custom_thresholds_respected(self):
         settings = get_attendance_settings(self.db)

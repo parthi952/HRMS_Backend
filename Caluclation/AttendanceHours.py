@@ -71,7 +71,11 @@ def classify_day(
     if on_leave:
         return "Leave"
     if not check_in:
-        return "Absent"
+        # Only a day that has already ended counts as Absent - today/future
+        # days with no punch yet are still Pending, since the day isn't over.
+        if day is not None and day < date_type.today():
+            return "Absent"
+        return "Pending"
     if not check_out:
         return "Pending"
     worked = hours_worked(check_in, check_out)
