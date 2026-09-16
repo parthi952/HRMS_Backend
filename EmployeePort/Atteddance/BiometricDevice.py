@@ -1,8 +1,10 @@
 import logging
 import os
 from datetime import datetime
+from typing import List
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import BaseModel
 
 import module.EmplyeeDB as EmplyeeDB
 from database import SessionLocal
@@ -149,6 +151,54 @@ async def device_push(request: Request, SN: str = Query(default=""), table: str 
         db.close()
 
     return Response(content=str(processed), media_type="text/plain")
+
+
+class BridgePunch(BaseModel):
+    pin: str
+    timestamp: str  # "YYYY-MM-DD HH:MM:SS"
+
+
+class BridgePushIn(BaseModel):
+    device_serial: str
+    punches: List[BridgePunch]
+
+
+@router.post("/bridge-push")
+def bridge_push(payload: BridgePushIn):
+    """
+    For devices that can't push to the cloud directly (old firmware, no
+    internet route to us). A small script on a PC in the office LAN reads
+    punches off the device locally (e.g. via pyzk) and posts them here in
+    plain JSON, instead of the device's own raw ADMS text format.
+    """
+    db = SessionLocal()
+    processed = 0
+    skipped: List[str] = []
+    try:
+        if not _device_allowed(db, payload.device_serial):
+            raise HTTPException(status_code=403, detail="Unregistered or inactive device")
+        _touch_device(db, payload.device_serial)
+
+        for punch in payload.punches:
+            try:
+                punched_at = datetime.strptime(punch.timestamp, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                skipped.append(punch.timestamp)
+                continue
+            if _apply_punch(db, punch.pin, punched_at, payload.device_serial):
+                processed += 1
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        logger.exception("Failed processing bridge push from SN=%s", payload.device_serial)
+        raise HTTPException(status_code=500, detail="Failed to process punches")
+    finally:
+        db.close()
+
+    return {"processed": processed, "skipped": skipped}
 
 
 @router.get("/getrequest")
